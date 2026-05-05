@@ -6,7 +6,7 @@ import { getArticleDetail } from './services/articleDetail';
 import { getEarningsCalendar } from './services/earningsCalendar';
 import { getMarketRanking } from './services/rankingService';
 import { newsMonitor } from './services/newsMonitor';
-import { getMarketQuote } from './services/quoteService';
+import { getMarketQuote, getQuoteCandles } from './services/quoteService';
 import { translateNewsItems } from './services/translationService';
 
 const app = Fastify({
@@ -58,6 +58,10 @@ const rankingQuerySchema = z.object({
 
 const quoteParamsSchema = z.object({
   symbol: z.string().trim().regex(/^[A-Za-z0-9.=-]{1,12}$/)
+});
+
+const quoteCandleQuerySchema = z.object({
+  range: z.enum(['minute', 'day', 'week', 'month', 'year']).default('minute')
 });
 
 app.get('/api/health', async () => ({
@@ -134,6 +138,23 @@ app.get('/api/quotes/:symbol', async (request, reply) => {
     return reply.status(502).send({
       error: error instanceof Error ? error.message : String(error),
       symbol: parsed.data.symbol.toUpperCase()
+    });
+  }
+});
+
+app.get('/api/quotes/:symbol/candles', async (request, reply) => {
+  const params = quoteParamsSchema.safeParse(request.params);
+  const query = quoteCandleQuerySchema.safeParse(request.query);
+  if (!params.success || !query.success) {
+    return reply.status(400).send({ error: 'invalid candle query' });
+  }
+
+  try {
+    return await getQuoteCandles(params.data.symbol, query.data.range);
+  } catch (error) {
+    return reply.status(502).send({
+      error: error instanceof Error ? error.message : String(error),
+      symbol: params.data.symbol.toUpperCase()
     });
   }
 });

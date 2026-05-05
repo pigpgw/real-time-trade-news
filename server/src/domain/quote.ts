@@ -52,3 +52,24 @@ export interface MarketQuote {
   nextSessionTime?: string;
   message?: string;
 }
+
+export type QuoteChartRange = 'minute' | 'day' | 'week' | 'month' | 'year';
+
+export interface QuoteCandle {
+  time: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close: number;
+  volume?: number;
+}
+
+export interface QuoteChartResult {
+  symbol: string;
+  range: QuoteChartRange;
+  provider: 'yahoo-chart';
+  generatedAt: string;
+  currency: string;
+  previousClose?: number;
+  candles: QuoteCandle[];
+}

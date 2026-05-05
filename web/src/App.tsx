@@ -35,6 +35,7 @@ type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
 type QuoteSession = 'day' | 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
 type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq' | 'tradingview';
+type ChartRange = 'minute' | 'day' | 'week' | 'month' | 'year';
 type NewsDirection = 'bullish' | 'bearish' | 'mixed' | 'neutral';
 type PositionBias = 'long' | 'inverse' | 'unknown';
 type PositionEffect = 'favorable' | 'unfavorable' | 'mixed' | 'neutral';
@@ -263,6 +264,25 @@ interface MarketQuote {
   message?: string;
 }
 
+interface QuoteCandle {
+  time: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close: number;
+  volume?: number;
+}
+
+interface QuoteChartResult {
+  symbol: string;
+  range: ChartRange;
+  provider: 'yahoo-chart';
+  generatedAt: string;
+  currency: string;
+  previousClose?: number;
+  candles: QuoteCandle[];
+}
+
 const examples = ['SOXL', 'TQQQ', 'Iran missile stocks', 'Strait of Hormuz oil', 'NVDA'];
 const scoutQueries = ['Nasdaq futures missile', 'Iran Israel attack oil', 'NVDA earnings', 'semiconductor sanctions'];
 const providerLabels: Record<NewsProviderId, string> = {
@@ -274,6 +294,14 @@ const providerLabels: Record<NewsProviderId, string> = {
   newsapi: 'NewsAPI',
   sec: 'SEC'
 };
+
+const chartRanges: Array<{ value: ChartRange; label: string }> = [
+  { value: 'minute', label: '분' },
+  { value: 'day', label: '일' },
+  { value: 'week', label: '주' },
+  { value: 'month', label: '월' },
+  { value: 'year', label: '년' }
+];
 
 export function App() {
   const queryClient = useQueryClient();
@@ -299,6 +327,8 @@ export function App() {
   const [rankingType, setRankingType] = useState<RankingType>('turnover');
   const [rankingMarket, setRankingMarket] = useState<RankingMarket>('US');
   const [selectedRankingSymbol, setSelectedRankingSymbol] = useState<string>();
+  const [chartRange, setChartRange] = useState<ChartRange>('minute');
+  const [quoteFlash, setQuoteFlash] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const quoteEventSourceRef = useRef<EventSource | null>(null);
   const searchSeqRef = useRef(0);
@@ -403,6 +433,23 @@ export function App() {
     refetchOnReconnect: true,
     retry: 1
   });
+  const chartQuery = useQuery({
+    queryKey: ['quote-chart', quoteSymbol, chartRange],
+    queryFn: ({ signal }) => fetchQuoteChart(quoteSymbol!, chartRange, signal),
+    enabled: Boolean(quoteSymbol),
+    staleTime: chartRange === 'minute' || chartRange === 'day' ? 5_000 : 60_000,
+    refetchInterval: quoteSymbol && (chartRange === 'minute' || chartRange === 'day') ? 10_000 : false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 1
+  });
+
+  useEffect(() => {
+    if (!quoteQuery.data?.generatedAt) return undefined;
+    setQuoteFlash(true);
+    const timer = window.setTimeout(() => setQuoteFlash(false), 650);
+    return () => window.clearTimeout(timer);
+  }, [quoteQuery.data?.generatedAt, quoteQuery.data?.activePrice]);
 
   useEffect(() => {
     quoteEventSourceRef.current?.close();
@@ -618,6 +665,7 @@ export function App() {
           quote={quoteQuery.data}
           isLoading={quoteQuery.isLoading}
           isError={quoteQuery.isError}
+          flash={quoteFlash}
         />
       )}
 
@@ -626,11 +674,18 @@ export function App() {
           signal={signal}
           counts={counts}
           priorityItems={priorityItems}
-          statuses={statuses}
-          providerHealth={providerHealth}
-          nextCheckLabel={secondsToNextCheck === undefined ? '대기' : `${secondsToNextCheck}s`}
           onSelectNews={setSelectedNewsId}
         />
+
+        {quoteSymbol && (
+          <QuoteChart
+            result={chartQuery.data}
+            range={chartRange}
+            quote={quoteQuery.data}
+            isLoading={chartQuery.isLoading}
+            onRangeChange={setChartRange}
+          />
+        )}
 
         <section className="feed-panel">
           <div className="feed-head">
@@ -647,7 +702,7 @@ export function App() {
             </div>
             <div className="live-panel">
               <span>{providerHealth}</span>
-              <span>{secondsToNextCheck === undefined ? '대기' : `${secondsToNextCheck}s`}</span>
+              <span>{secondsToNextCheck === undefined ? '대기' : `뉴스 ${secondsToNextCheck}s`}</span>
               <button type="button" onClick={() => activeQuery && runSearch(activeQuery)}>
                 <RefreshCw size={16} aria-hidden />
                 즉시
@@ -757,7 +812,6 @@ export function App() {
           />
 
           <EarningsMini result={earningsQuery.data} />
-          <SourceConsole statuses={statuses} />
         </aside>
       </main>
     </div>
@@ -768,20 +822,13 @@ function SignalBoard({
   signal,
   counts,
   priorityItems,
-  statuses,
-  providerHealth,
-  nextCheckLabel,
   onSelectNews
 }: {
   signal: ReturnType<typeof buildSignal>;
   counts: { all: number; high: number; market: number; direct: number; unfavorable: number; favorable: number };
   priorityItems: NewsItem[];
-  statuses: ProviderStatus[];
-  providerHealth: string;
-  nextCheckLabel: string;
   onSelectNews: (id: string) => void;
 }) {
-  const sourceCounts = sourceStatusCounts(statuses);
   const topItem = priorityItems[0];
   const topImpact = topItem ? fallbackImpact(topItem) : undefined;
 
@@ -829,22 +876,6 @@ function SignalBoard({
           </div>
         )}
       </div>
-
-      <div className="signal-card source">
-        <div className="section-title">
-          <Radio size={16} aria-hidden />
-          <div>
-            <h2>소스 상태</h2>
-            <span>{providerHealth}</span>
-          </div>
-        </div>
-        <div className="source-grid">
-          <Metric label="정상" value={sourceCounts.ok} />
-          <Metric label="오류" value={sourceCounts.error} tone={sourceCounts.error > 0 ? 'danger' : undefined} />
-          <Metric label="비활성" value={sourceCounts.disabled} />
-          <Metric label="다음" valueText={nextCheckLabel} />
-        </div>
-      </div>
     </section>
   );
 }
@@ -853,12 +884,14 @@ function QuoteStrip({
   symbol,
   quote,
   isLoading,
-  isError
+  isError,
+  flash
 }: {
   symbol: string;
   quote?: MarketQuote;
   isLoading: boolean;
   isError: boolean;
+  flash: boolean;
 }) {
   const tone = quote ? (isNegativeNumber(quote.activeChangePercent) ? 'negative' : 'positive') : 'neutral';
   const session = quote ? quoteSessionLabel(quote.session) : '가격 대기';
@@ -879,7 +912,7 @@ function QuoteStrip({
     : undefined;
 
   return (
-    <section className={`quote-strip ${tone}`}>
+    <section className={`quote-strip ${tone} ${flash ? 'quote-flash' : ''}`}>
       <div className="quote-identity">
         <span className={`session-pill ${quote?.session ?? 'unknown'}`}>{session}</span>
         <div>
@@ -905,6 +938,64 @@ function QuoteStrip({
         <span>{quoteStatus}</span>
         <small>{quote?.provider ?? 'quote'} · {quote?.exchange ?? 'US'}</small>
         {nextSession && <small>{nextSession}</small>}
+      </div>
+    </section>
+  );
+}
+
+function QuoteChart({
+  result,
+  range,
+  quote,
+  isLoading,
+  onRangeChange
+}: {
+  result?: QuoteChartResult;
+  range: ChartRange;
+  quote?: MarketQuote;
+  isLoading: boolean;
+  onRangeChange: (range: ChartRange) => void;
+}) {
+  const candles = result?.candles ?? [];
+  const displayCandles = withActiveQuote(candles, quote);
+  const latest = displayCandles[displayCandles.length - 1];
+  const tone = isNegativeNumber(quote?.activeChangePercent) ? 'negative' : 'positive';
+  const linePath = buildChartPath(displayCandles);
+  const volumeBars = buildVolumeBars(displayCandles);
+
+  return (
+    <section className={`quote-chart ${tone}`}>
+      <div className="chart-head">
+        <div>
+          <h2>가격 차트</h2>
+          <span>{latest ? `${formatMaybeCurrency(latest.close, result?.currency)} · ${formatDateTime(latest.time)}` : isLoading ? '차트 수집 중' : '데이터 대기'}</span>
+        </div>
+        <div className="chart-tabs" aria-label="차트 범위">
+          {chartRanges.map((item) => (
+            <button
+              key={item.value}
+              className={range === item.value ? 'active' : ''}
+              type="button"
+              onClick={() => onRangeChange(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="chart-surface">
+        {linePath ? (
+          <svg viewBox="0 0 640 220" role="img" aria-label="가격 차트">
+            <path className="chart-grid" d="M0 44H640M0 88H640M0 132H640M0 176H640" />
+            <path className="chart-line-shadow" d={linePath} />
+            <path className="chart-line" d={linePath} />
+            {volumeBars.map((bar) => (
+              <rect key={bar.key} className="volume-bar" x={bar.x} y={bar.y} width={bar.width} height={bar.height} />
+            ))}
+          </svg>
+        ) : (
+          <div className="compact-empty">차트 데이터를 기다리는 중입니다.</div>
+        )}
       </div>
     </section>
   );
@@ -1013,31 +1104,6 @@ function EarningsMini({ result }: { result?: EarningsCalendarResult }) {
           <span>{formatEarningsTime(item)}</span>
         </div>
       ))}
-    </section>
-  );
-}
-
-function SourceConsole({ statuses }: { statuses: ProviderStatus[] }) {
-  if (statuses.length === 0) return null;
-
-  return (
-    <section className="source-console">
-      <div className="section-title">
-        <Wifi size={16} aria-hidden />
-        <div>
-          <h2>뉴스 소스</h2>
-          <span>장애 확인</span>
-        </div>
-      </div>
-      <div className="source-status-list">
-        {statuses.map((status) => (
-          <div className={`source-status-row ${status.status}`} key={status.id}>
-            <span>{status.label}</span>
-            <strong>{sourceStatusLabel(status.status)}</strong>
-            {status.message && <small>{status.message}</small>}
-          </div>
-        ))}
-      </div>
     </section>
   );
 }
@@ -1299,6 +1365,19 @@ async function fetchMarketQuote(symbol: string, signal?: AbortSignal): Promise<M
   return response.json() as Promise<MarketQuote>;
 }
 
+async function fetchQuoteChart(
+  symbol: string,
+  range: ChartRange,
+  signal?: AbortSignal
+): Promise<QuoteChartResult> {
+  const response = await fetch(
+    `/api/quotes/${encodeURIComponent(symbol)}/candles?${new URLSearchParams({ range }).toString()}`,
+    { signal }
+  );
+  if (!response.ok) throw new Error(`차트 조회 실패: HTTP ${response.status}`);
+  return response.json() as Promise<QuoteChartResult>;
+}
+
 async function fetchEarningsCalendar(symbols: string[], signal?: AbortSignal): Promise<EarningsCalendarResult> {
   const response = await fetch(
     `/api/earnings/calendar?${new URLSearchParams({ symbols: symbols.join(',') }).toString()}`,
@@ -1452,21 +1531,6 @@ function buildProviderHealth(statuses: ProviderStatus[]): string {
   return error > 0 ? `소스 ${ok}/${statuses.length} · 오류 ${error}` : `소스 ${ok}/${statuses.length}`;
 }
 
-function sourceStatusCounts(statuses: ProviderStatus[]): { ok: number; error: number; disabled: number } {
-  return {
-    ok: statuses.filter((status) => status.status === 'ok').length,
-    error: statuses.filter((status) => status.status === 'error').length,
-    disabled: statuses.filter((status) => status.status === 'disabled').length
-  };
-}
-
-function sourceStatusLabel(status: ProviderStatus['status']): string {
-  if (status === 'ok') return '정상';
-  if (status === 'error') return '오류';
-  if (status === 'disabled') return '꺼짐';
-  return '대기';
-}
-
 function isMarketImpact(item: NewsItem): boolean {
   const text = `${item.title} ${item.snippet ?? ''} ${item.matchedKeywords.join(' ')}`.toLowerCase();
   return marketImpactTerms.some((term) => text.includes(term));
@@ -1536,16 +1600,26 @@ function isFreshItem(item: NewsItem): boolean {
 function formatKoreaDateTime(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
-    month: '2-digit',
-    day: '2-digit',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(value));
 }
 
+function formatKoreaReportDate(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short'
+  }).format(new Date(`${value}T00:00:00+09:00`));
+}
+
 function formatEarningsTime(item: EarningsEvent): string {
-  const base = item.koreaTime ? formatKoreaDateTime(item.koreaTime) : item.reportDate;
-  return item.isEstimatedTime ? `${base}` : `${base} 미정`;
+  const base = item.koreaTime ? formatKoreaDateTime(item.koreaTime) : `${formatKoreaReportDate(item.reportDate)} 시간 미정`;
+  return item.isEstimatedTime ? `${base} 예상` : base;
 }
 
 function formatSignedRate(value?: string): string {
@@ -1592,6 +1666,87 @@ function isNegative(value?: string): boolean {
 
 function isNegativeNumber(value?: number): boolean {
   return value !== undefined && value < 0;
+}
+
+function withActiveQuote(candles: QuoteCandle[], quote?: MarketQuote): QuoteCandle[] {
+  if (!quote?.activePrice || !Number.isFinite(quote.activePrice)) return candles;
+
+  const activeTime = quote.activeTime ?? quote.dayMarketTime ?? quote.extendedTime ?? quote.generatedAt;
+  const activeVolume = quote.dayMarketVolume ?? quote.extendedVolume ?? quote.volume;
+  const last = candles[candles.length - 1];
+  if (!last) {
+    return [{ time: activeTime, close: quote.activePrice, volume: activeVolume }];
+  }
+
+  const activeMs = new Date(activeTime).getTime();
+  const lastMs = new Date(last.time).getTime();
+  if (Number.isFinite(activeMs) && Number.isFinite(lastMs) && Math.abs(activeMs - lastMs) < 60_000) {
+    return [
+      ...candles.slice(0, -1),
+      {
+        ...last,
+        close: quote.activePrice,
+        volume: activeVolume ?? last.volume
+      }
+    ];
+  }
+
+  return [
+    ...candles,
+    {
+      time: activeTime,
+      close: quote.activePrice,
+      volume: activeVolume
+    }
+  ];
+}
+
+function buildChartPath(candles: QuoteCandle[]): string | undefined {
+  const sampled = sampleCandles(candles, 190);
+  if (sampled.length < 2) return undefined;
+
+  const values = sampled.map((candle) => candle.close).filter(Number.isFinite);
+  if (values.length < 2) return undefined;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || Math.max(1, Math.abs(max) * 0.01);
+  const top = 18;
+  const height = 138;
+  const width = 640;
+
+  return sampled.map((candle, index) => {
+    const x = (index / (sampled.length - 1)) * width;
+    const y = top + (1 - (candle.close - min) / span) * height;
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(' ');
+}
+
+function buildVolumeBars(candles: QuoteCandle[]): Array<{ key: string; x: number; y: number; width: number; height: number }> {
+  const sampled = sampleCandles(candles, 120);
+  const volumes = sampled.map((candle) => candle.volume ?? 0);
+  const maxVolume = Math.max(0, ...volumes);
+  if (sampled.length === 0 || maxVolume === 0) return [];
+
+  const width = Math.max(1.5, 640 / sampled.length - 1);
+  return sampled.map((candle, index) => {
+    const height = Math.max(1, ((candle.volume ?? 0) / maxVolume) * 34);
+    return {
+      key: `${candle.time}-${index}`,
+      x: index * (640 / sampled.length),
+      y: 212 - height,
+      width,
+      height
+    };
+  });
+}
+
+function sampleCandles(candles: QuoteCandle[], limit: number): QuoteCandle[] {
+  if (candles.length <= limit) return candles;
+  const step = Math.ceil(candles.length / limit);
+  const sampled = candles.filter((_, index) => index % step === 0);
+  const last = candles[candles.length - 1];
+  return sampled[sampled.length - 1] === last ? sampled : [...sampled, last];
 }
 
 function quoteSessionLabel(session: QuoteSession): string {

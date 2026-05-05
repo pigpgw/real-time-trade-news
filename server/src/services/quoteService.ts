@@ -1,4 +1,4 @@
-import type { MarketQuote, QuoteSession } from '../domain/quote';
+import type { MarketQuote, QuoteCandle, QuoteChartRange, QuoteChartResult, QuoteSession } from '../domain/quote';
 import { config } from '../config';
 import { fetchJson } from '../providers/http';
 
@@ -65,12 +65,23 @@ interface YahooChartResponse {
       indicators?: {
         quote?: Array<{
           close?: Array<number | null>;
+          high?: Array<number | null>;
+          low?: Array<number | null>;
+          open?: Array<number | null>;
           volume?: Array<number | null>;
         }>;
       };
     }>;
     error?: { description?: string };
   };
+}
+
+interface YahooChartQuote {
+  close?: Array<number | null>;
+  high?: Array<number | null>;
+  low?: Array<number | null>;
+  open?: Array<number | null>;
+  volume?: Array<number | null>;
 }
 
 interface NasdaqQuoteResponse {
@@ -152,6 +163,35 @@ export async function getMarketQuote(symbol: string): Promise<MarketQuote> {
 
   inFlight.set(normalized, request);
   return request;
+}
+
+export async function getQuoteCandles(symbol: string, range: QuoteChartRange): Promise<QuoteChartResult> {
+  const normalized = normalizeSymbol(symbol);
+  const config = chartRangeConfig(range);
+  const payload = await fetchJson<YahooChartResponse>(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalized)}?${new URLSearchParams({
+      interval: config.interval,
+      range: config.range,
+      includePrePost: config.includePrePost ? 'true' : 'false'
+    }).toString()}`,
+    { headers },
+    8_000
+  );
+  const result = payload.chart?.result?.[0];
+  if (!result?.meta) throw new Error(payload.chart?.error?.description ?? 'Yahoo chart quote not found');
+
+  const quote = result.indicators?.quote?.[0];
+  const candles = normalizeCandles(result.timestamp ?? [], quote);
+
+  return {
+    symbol: result.meta.symbol ?? normalized,
+    range,
+    provider: 'yahoo-chart',
+    generatedAt: new Date().toISOString(),
+    currency: result.meta.currency ?? 'USD',
+    previousClose: result.meta.chartPreviousClose ?? result.meta.previousClose,
+    candles
+  };
 }
 
 export function parseCnbcQuotePayload(payload: CnbcQuoteResponse, symbol: string, now = new Date()): MarketQuote {
@@ -614,6 +654,42 @@ function lastHistorical(values?: RobinhoodHistoricalResponse['historicals']): No
     if (toNumber(item?.close_price) !== undefined) return item;
   }
   return undefined;
+}
+
+function normalizeCandles(timestamps: number[], quote?: YahooChartQuote): QuoteCandle[] {
+  const candles: QuoteCandle[] = [];
+  const closes = quote?.close ?? [];
+  const opens = quote?.open ?? [];
+  const highs = quote?.high ?? [];
+  const lows = quote?.low ?? [];
+  const volumes = quote?.volume ?? [];
+
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const close = closes[index];
+    if (typeof close !== 'number' || !Number.isFinite(close)) continue;
+    candles.push({
+      time: new Date(timestamps[index] * 1000).toISOString(),
+      open: finiteNumber(opens[index]),
+      high: finiteNumber(highs[index]),
+      low: finiteNumber(lows[index]),
+      close,
+      volume: finiteNumber(volumes[index])
+    });
+  }
+
+  return candles;
+}
+
+function finiteNumber(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function chartRangeConfig(range: QuoteChartRange): { interval: string; range: string; includePrePost: boolean } {
+  if (range === 'minute') return { interval: '1m', range: '1d', includePrePost: true };
+  if (range === 'day') return { interval: '5m', range: '1d', includePrePost: true };
+  if (range === 'week') return { interval: '15m', range: '5d', includePrePost: true };
+  if (range === 'month') return { interval: '1h', range: '1mo', includePrePost: false };
+  return { interval: '1d', range: '1y', includePrePost: false };
 }
 
 function computeChange(price?: number, previousClose?: number): number | undefined {
