@@ -24,7 +24,7 @@ type NewsProviderId = 'direct-rss' | 'source-search' | 'gdelt' | 'google-news' |
 type NewsSeverity = 'low' | 'medium' | 'high';
 type FeedFilter = 'all' | 'high' | 'market' | NewsProviderId;
 type ConnectionState = 'idle' | 'connecting' | 'live' | 'error';
-type RiskLevel = 'calm' | 'watch' | 'risk-off';
+type RiskLevel = 'calm' | 'watch' | 'risk-off' | 'opportunity';
 type EarningsReportTime = 'BMO' | 'AMC' | 'TAS' | 'UNKNOWN';
 type EarningsStatus = 'upcoming' | 'reported';
 type EarningsSource = 'finnhub' | 'alpha-vantage' | 'sample';
@@ -35,6 +35,12 @@ type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
 type QuoteSession = 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
 type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
+type NewsDirection = 'bullish' | 'bearish' | 'mixed' | 'neutral';
+type PositionBias = 'long' | 'inverse' | 'unknown';
+type PositionEffect = 'favorable' | 'unfavorable' | 'mixed' | 'neutral';
+type TruthRisk = 'low' | 'medium' | 'high';
+type PriceReactionDirection = 'up' | 'down' | 'flat' | 'unknown';
+type MarketAlignment = 'confirming' | 'diverging' | 'neutral' | 'unknown';
 
 interface NewsImpactFactor {
   id: string;
@@ -50,6 +56,30 @@ interface NewsImpact {
   deliveryMode: NewsDeliveryMode;
   confidence: number;
   summary: string;
+  direction: NewsDirection;
+  directionLabel: string;
+  positionBias: PositionBias;
+  positionEffect: PositionEffect;
+  positionLabel: string;
+  actionHint: string;
+  verification: {
+    level: 'confirmed' | 'corroborated' | 'single-source' | 'rumor' | 'disputed';
+    label: string;
+    confidence: number;
+    truthRisk: TruthRisk;
+    reason: string;
+    corroboratingReports: number;
+  };
+  truthRisk: TruthRisk;
+  priceReaction: {
+    direction: PriceReactionDirection;
+    changePercent?: number;
+    session?: string;
+    aligned: boolean;
+    label: string;
+    reason: string;
+  };
+  marketAlignment: MarketAlignment;
   affectedChannels: string[];
   factors: NewsImpactFactor[];
 }
@@ -287,7 +317,9 @@ export function App() {
     all: items.length,
     high: items.filter((item) => impactScore(item) >= 60).length,
     market: items.filter(isMarketImpact).length,
-    direct: items.filter((item) => item.provider === 'direct-rss' || item.provider === 'source-search').length
+    direct: items.filter((item) => item.provider === 'direct-rss' || item.provider === 'source-search').length,
+    unfavorable: items.filter((item) => fallbackImpact(item).positionEffect === 'unfavorable').length,
+    favorable: items.filter((item) => fallbackImpact(item).positionEffect === 'favorable').length
   }), [items]);
   const priorityItems = useMemo(() => topImpactItems(items, 4), [items]);
 
@@ -694,7 +726,7 @@ function SignalBoard({
   onSelectNews
 }: {
   signal: ReturnType<typeof buildSignal>;
-  counts: { all: number; high: number; market: number; direct: number };
+  counts: { all: number; high: number; market: number; direct: number; unfavorable: number; favorable: number };
   priorityItems: NewsItem[];
   statuses: ProviderStatus[];
   providerHealth: string;
@@ -715,10 +747,10 @@ function SignalBoard({
         <strong>{signal.label}</strong>
         <p>{signal.reason}</p>
         <div className="risk-stats">
-          <Metric label="긴급" value={counts.high} tone={counts.high > 0 ? 'danger' : undefined} />
+          <Metric label="불리" value={counts.unfavorable} tone={counts.unfavorable > 0 ? 'danger' : undefined} />
+          <Metric label="유리" value={counts.favorable} />
           <Metric label="시장" value={counts.market} tone={counts.market > 0 ? 'danger' : undefined} />
           <Metric label="원문" value={counts.direct} />
-          <Metric label="전체" value={counts.all} />
         </div>
       </div>
 
@@ -738,7 +770,7 @@ function SignalBoard({
               const impact = fallbackImpact(item);
               return (
                 <button type="button" key={item.id} onClick={() => onSelectNews(item.id)}>
-                  <span className={`impact-score small ${impact.level}`}>{impact.score}</span>
+                  <span className={`impact-score small ${impact.level} effect-${impact.positionEffect}`}>{impact.score}</span>
                   <div>
                     <strong>{item.title}</strong>
                     <small>{item.sourceName} · {formatAge(item.publishedAt)}</small>
@@ -961,18 +993,18 @@ function BreakingAlert({
   const impact = fallbackImpact(item);
 
   return (
-    <section className={`breaking-alert ${impact.level}`} role="status" aria-live="assertive">
+    <section className={`breaking-alert ${impact.level} effect-${impact.positionEffect}`} role="status" aria-live="assertive">
       <div className="breaking-icon">
         <AlertTriangle size={19} aria-hidden />
       </div>
       <div className="breaking-copy" onClick={onOpen}>
         <div>
           <span>{deliveryLabel(impact.deliveryMode)}</span>
-          <strong>영향도 {impact.score}</strong>
-          <em>{impact.label}</em>
+          <strong>{impact.positionLabel} {impact.score}</strong>
+          <em>{impact.directionLabel} 재료</em>
         </div>
         <h2>{translatedTitle(item, translation, displayLanguage)}</h2>
-        <p>{impact.summary}</p>
+        <p>{impact.actionHint}</p>
       </div>
       <button className="breaking-open" type="button" onClick={onOpen}>상세</button>
       <button className="breaking-close" type="button" aria-label="긴급 알림 닫기" onClick={onClose}>
@@ -1001,7 +1033,7 @@ function ArticlePanel({
       </section>
     );
   }
-  const impact = detail?.impact ?? item.impact;
+  const impact = item.impact ?? detail?.impact;
 
   return (
     <section className="article-panel">
@@ -1039,13 +1071,20 @@ function ImpactBreakdown({ impact }: { impact?: NewsImpact }) {
   const resolved = resolveImpact(impact);
 
   return (
-    <div className={`impact-panel ${resolved.level}`}>
+    <div className={`impact-panel ${resolved.level} effect-${resolved.positionEffect}`}>
       <div className="impact-summary">
-        <span className={`impact-score ${resolved.level}`}>{resolved.score}</span>
+        <span className={`impact-score ${resolved.level} effect-${resolved.positionEffect}`}>{resolved.score}</span>
         <div>
           <strong>{resolved.summary}</strong>
-          <span>{deliveryLabel(resolved.deliveryMode)} · 신뢰도 {resolved.confidence}%</span>
+          <span>{deliveryLabel(resolved.deliveryMode)} · 신뢰도 {resolved.confidence}% · {resolved.verification.label}</span>
         </div>
+      </div>
+      <div className="impact-tags">
+        <span className={`position-effect ${resolved.positionEffect}`}>{resolved.positionLabel}</span>
+        <span>{positionBiasLabel(resolved.positionBias)}</span>
+        <span>{resolved.directionLabel} 재료</span>
+        <span>{resolved.priceReaction.label}</span>
+        <span>{truthRiskLabel(resolved.truthRisk)}</span>
       </div>
       {resolved.factors.length > 0 && (
         <div className="impact-factors">
@@ -1099,11 +1138,12 @@ function NewsCard({
   const primaryFactor = impact.factors[0];
 
   return (
-    <article className={`news-card ${item.severity} impact-${impact.level} ${fresh ? 'fresh' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <article className={`news-card ${item.severity} impact-${impact.level} effect-${impact.positionEffect} ${fresh ? 'fresh' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="news-topline">
         <time>{formatAge(item.publishedAt)}</time>
         <span className="provider-chip">{providerLabels[item.provider]}</span>
-        <span className={`impact-score small ${impact.level}`}>{impact.score}</span>
+        <span className={`impact-score small ${impact.level} effect-${impact.positionEffect}`}>{impact.score}</span>
+        <span className={`effect-chip ${impact.positionEffect}`}>{impact.positionLabel}</span>
         {fresh && <span className="fresh-chip">NEW</span>}
         {isMarketImpact(item) && <span className="impact-chip">시장영향</span>}
         {item.country && (
@@ -1118,7 +1158,8 @@ function NewsCard({
       {snippet && <p>{snippet}</p>}
       <div className="news-footer">
         <span className={`severity ${item.severity}`}>{severityLabel(item.severity)}</span>
-        <span className={`delivery-chip ${impact.level}`}>{deliveryLabel(impact.deliveryMode)}</span>
+        <span className={`delivery-chip ${impact.level} effect-${impact.positionEffect}`}>{deliveryLabel(impact.deliveryMode)}</span>
+        <span className="factor-chip">{impact.directionLabel}</span>
         {primaryFactor && <span className="factor-chip">{primaryFactor.label}</span>}
         <strong>{item.sourceName}</strong>
       </div>
@@ -1289,6 +1330,28 @@ function resolveImpact(impact?: NewsImpact, fallbackScore = 18): NewsImpact {
     deliveryMode: level === 'critical' ? 'breaking' : level === 'high' ? 'priority' : level === 'medium' ? 'watch' : 'normal',
     confidence: 45,
     summary: level === 'high' || level === 'critical' ? '중요 키워드 기반 긴급 확인 대상입니다.' : '일반 모니터링 항목입니다.',
+    direction: 'neutral',
+    directionLabel: '중립',
+    positionBias: 'unknown',
+    positionEffect: 'neutral',
+    positionLabel: '중립',
+    actionHint: '추가 보도와 가격 반응을 확인하세요.',
+    verification: {
+      level: 'single-source',
+      label: '단일 출처',
+      confidence: 45,
+      truthRisk: 'medium',
+      reason: '영향도 상세 데이터 없음',
+      corroboratingReports: 0
+    },
+    truthRisk: 'medium',
+    priceReaction: {
+      direction: 'unknown',
+      aligned: false,
+      label: '가격 반응 없음',
+      reason: '가격 데이터 없음'
+    },
+    marketAlignment: 'unknown',
     affectedChannels: [],
     factors: []
   };
@@ -1303,12 +1366,17 @@ function buildSignal(items: NewsItem[], newItemsCount: number): {
   const recentItems = items.filter((item) => now - new Date(item.publishedAt).getTime() <= 2 * 60 * 60 * 1000);
   const recentHigh = recentItems.filter((item) => item.severity === 'high').length;
   const topImpact = Math.max(0, ...recentItems.map(impactScore));
+  const adverseItems = recentItems.filter((item) => fallbackImpact(item).positionEffect === 'unfavorable');
+  const favorableItems = recentItems.filter((item) => fallbackImpact(item).positionEffect === 'favorable');
+  const adverseTop = Math.max(0, ...adverseItems.map(impactScore));
+  const favorableTop = Math.max(0, ...favorableItems.map(impactScore));
   const marketHits = recentItems.filter(isMarketImpact).length;
   const directHits = recentItems.filter((item) => item.provider === 'source-search' || item.provider === 'direct-rss').length;
-  const score = Math.round(topImpact / 10) + recentHigh * 2 + marketHits * 2 + directHits + Math.min(newItemsCount, 5);
+  const score = Math.round(topImpact / 10) + adverseItems.length * 3 + recentHigh * 2 + marketHits * 2 + directHits + Math.min(newItemsCount, 5);
 
-  if (topImpact >= 80 || score >= 12) return { level: 'risk-off', label: 'RISK-OFF', reason: `최고 영향도 ${topImpact}. 긴급 원문과 시장영향 뉴스가 동시에 증가했습니다.` };
-  if (topImpact >= 60 || score >= 5) return { level: 'watch', label: 'WATCH', reason: `최고 영향도 ${topImpact}. 단타 대응이 필요한 뉴스 밀도가 있습니다.` };
+  if (adverseTop >= 70 || score >= 14) return { level: 'risk-off', label: '손절 경계', reason: `포지션 불리 최고 ${adverseTop}. 가격 하락/악재성 뉴스가 우선입니다.` };
+  if (favorableTop >= 70 && favorableTop > adverseTop + 10) return { level: 'opportunity', label: '상승 재료', reason: `포지션 유리 최고 ${favorableTop}. 호재와 가격 반응을 같이 확인하세요.` };
+  if (topImpact >= 60 || score >= 5) return { level: 'watch', label: 'WATCH', reason: `최고 영향도 ${topImpact}. 방향성 확인이 필요한 뉴스 밀도가 있습니다.` };
   return { level: 'calm', label: 'CALM', reason: '최근 2시간 기준 급한 신호가 적습니다.' };
 }
 
@@ -1364,6 +1432,18 @@ function deliveryLabel(mode: NewsDeliveryMode): string {
   if (mode === 'priority') return '우선 확인';
   if (mode === 'watch') return '관찰';
   return '일반';
+}
+
+function positionBiasLabel(positionBias: PositionBias): string {
+  if (positionBias === 'long') return '상승형 기준';
+  if (positionBias === 'inverse') return '인버스 기준';
+  return '포지션 미지정';
+}
+
+function truthRiskLabel(truthRisk: TruthRisk): string {
+  if (truthRisk === 'high') return '사실위험 높음';
+  if (truthRisk === 'medium') return '사실위험 중간';
+  return '사실위험 낮음';
 }
 
 function formatDateTime(value: string): string {

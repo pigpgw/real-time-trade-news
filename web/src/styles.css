@@ -239,6 +239,14 @@ button {
   border-left-color: var(--blue500);
 }
 
+.breaking-alert.effect-favorable {
+  border-left-color: var(--red500);
+}
+
+.breaking-alert.effect-unfavorable {
+  border-left-color: var(--blue500);
+}
+
 .breaking-icon {
   width: 38px;
   height: 38px;
@@ -253,6 +261,16 @@ button {
 .breaking-alert.high .breaking-icon {
   color: var(--yellow600);
   background: var(--yellow50);
+}
+
+.breaking-alert.effect-favorable .breaking-icon {
+  color: var(--red600);
+  background: var(--red50);
+}
+
+.breaking-alert.effect-unfavorable .breaking-icon {
+  color: var(--blue600);
+  background: var(--blue50);
 }
 
 .breaking-copy {
@@ -280,6 +298,16 @@ button {
 .breaking-alert.high .breaking-copy strong,
 .breaking-alert.high .breaking-copy em {
   color: var(--yellow600);
+}
+
+.breaking-alert.effect-favorable .breaking-copy strong,
+.breaking-alert.effect-favorable .breaking-copy em {
+  color: var(--red600);
+}
+
+.breaking-alert.effect-unfavorable .breaking-copy strong,
+.breaking-alert.effect-unfavorable .breaking-copy em {
+  color: var(--blue600);
 }
 
 .breaking-copy h2 {
@@ -316,6 +344,14 @@ button {
 
 .breaking-alert.high .breaking-open {
   background: var(--yellow600);
+}
+
+.breaking-alert.effect-unfavorable .breaking-open {
+  background: var(--blue500);
+}
+
+.breaking-alert.effect-favorable .breaking-open {
+  background: var(--red500);
 }
 
 .breaking-close {
@@ -520,6 +556,11 @@ button {
 }
 
 .signal-card.primary.risk-off {
+  background: var(--blue50);
+  border-color: #cfe5ff;
+}
+
+.signal-card.primary.opportunity {
   background: var(--red50);
   border-color: #ffd4d6;
 }
@@ -548,8 +589,12 @@ button {
   color: var(--yellow600);
 }
 
-.signal-card.primary.risk-off > strong {
+.signal-card.primary.opportunity > strong {
   color: var(--red600);
+}
+
+.signal-card.primary.risk-off > strong {
+  color: var(--blue600);
 }
 
 .signal-card.primary p {
@@ -1063,6 +1108,18 @@ button {
   background: #fffdf7;
 }
 
+.news-card.effect-favorable {
+  border-left: 4px solid var(--red500);
+}
+
+.news-card.effect-unfavorable {
+  border-left: 4px solid var(--blue500);
+}
+
+.news-card.effect-mixed {
+  border-left: 4px solid var(--yellow600);
+}
+
 .news-card.fresh {
   border-color: var(--blue200);
 }
@@ -1106,6 +1163,7 @@ button {
 
 .provider-chip,
 .impact-chip,
+.effect-chip,
 .fresh-chip,
 .factor-chip,
 .delivery-chip,
@@ -1125,6 +1183,34 @@ button {
 .impact-chip {
   color: var(--red600);
   background: var(--red50);
+}
+
+.effect-chip.favorable,
+.impact-score.effect-favorable,
+.delivery-chip.effect-favorable {
+  color: var(--red600);
+  background: var(--red50);
+}
+
+.effect-chip.unfavorable,
+.impact-score.effect-unfavorable,
+.delivery-chip.effect-unfavorable {
+  color: var(--blue600);
+  background: var(--blue50);
+}
+
+.effect-chip.mixed,
+.impact-score.effect-mixed,
+.delivery-chip.effect-mixed {
+  color: var(--yellow600);
+  background: var(--yellow50);
+}
+
+.effect-chip.neutral,
+.impact-score.effect-neutral,
+.delivery-chip.effect-neutral {
+  color: var(--grey700);
+  background: var(--grey100);
 }
 
 .fresh-chip {
@@ -1245,6 +1331,21 @@ button {
   background: #fffdf7;
 }
 
+.impact-panel.effect-favorable {
+  border-color: #ffd4d6;
+  background: #fffafa;
+}
+
+.impact-panel.effect-unfavorable {
+  border-color: #cfe5ff;
+  background: #f7fbff;
+}
+
+.impact-panel.effect-mixed {
+  border-color: #ffe0a3;
+  background: #fffdf7;
+}
+
 .impact-summary {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -1266,6 +1367,41 @@ button {
   font-size: 12px;
   line-height: 18px;
   font-weight: 800;
+}
+
+.impact-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.impact-tags span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--grey700);
+  background: var(--grey100);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 800;
+}
+
+.impact-tags .position-effect.favorable {
+  color: var(--red600);
+  background: var(--red50);
+}
+
+.impact-tags .position-effect.unfavorable {
+  color: var(--blue600);
+  background: var(--blue50);
+}
+
+.impact-tags .position-effect.mixed {
+  color: var(--yellow600);
+  background: var(--yellow50);
 }
 
 .impact-factors {

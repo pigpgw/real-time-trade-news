@@ -1,8 +1,9 @@
 import { config } from '../config';
 import type { NewsItem, NewsProvider, NewsProviderId, NewsSearchResult, ProviderStatus } from '../domain/news';
-import { scoreNewsImpact } from '../domain/impactScoring';
+import { scoreNewsImpact, type PriceContext } from '../domain/impactScoring';
 import { compactQuery, dedupeNews } from '../domain/newsUtils';
 import { newsProviders } from '../providers';
+import { getMarketQuote } from './quoteService';
 
 export class NewsMonitor {
   private statuses = new Map<NewsProviderId, ProviderStatus>();
@@ -56,6 +57,7 @@ export class NewsMonitor {
   ): Promise<NewsSearchResult> {
 
     const enabledProviders = this.providers.filter((provider) => provider.enabled());
+    const priceContextPromise = resolvePriceContext(normalizedQuery);
     const settled = await Promise.allSettled(
       enabledProviders.map(async (provider) => {
         return this.fetchProvider(provider, normalizedQuery, lookbackHours);
@@ -81,12 +83,14 @@ export class NewsMonitor {
     this.refreshDisabledStatuses();
 
     const dedupedItems = dedupeNews(allItems).slice(0, 150);
+    const price = await priceContextPromise;
     const items = dedupedItems.map((item) => ({
       ...item,
       impact: scoreNewsImpact({
         query: normalizedQuery,
         item,
-        peers: dedupedItems
+        peers: dedupedItems.filter((peer) => peer.id !== item.id),
+        price
       })
     }));
 
@@ -193,4 +197,49 @@ function providerTtlMs(providerId: NewsProviderId): number {
   if (providerId === 'gdelt') return 180_000;
   if (providerId === 'sec') return 300_000;
   return 60_000;
+}
+
+const quoteSymbols = new Set([
+  'SOXL',
+  'TQQQ',
+  'SQQQ',
+  'SOXS',
+  'QQQ',
+  'SPY',
+  'NVDA',
+  'AMD',
+  'AVGO',
+  'TSM',
+  'ASML',
+  'MU',
+  'AAPL',
+  'MSFT',
+  'AMZN',
+  'META',
+  'GOOGL',
+  'GOOG',
+  'TSLA'
+]);
+
+async function resolvePriceContext(query: string): Promise<PriceContext | undefined> {
+  const symbol = inferQuoteSymbol(query);
+  if (!symbol) return undefined;
+
+  return getMarketQuote(symbol)
+    .then((quote) => ({
+      symbol: quote.symbol,
+      session: quote.session,
+      activeChangePercent: quote.activeChangePercent,
+      regularChangePercent: quote.regularChangePercent,
+      provider: quote.provider,
+      isRealtime: quote.isRealtime
+    }))
+    .catch(() => undefined);
+}
+
+function inferQuoteSymbol(query: string): string | undefined {
+  const compact = query.trim().toUpperCase();
+  if (quoteSymbols.has(compact)) return compact;
+  const tokens = compact.match(/\b[A-Z][A-Z0-9.=-]{0,11}\b/g) ?? [];
+  return tokens.find((token) => quoteSymbols.has(token));
 }
