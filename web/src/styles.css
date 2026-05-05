@@ -364,7 +364,7 @@ button {
   min-height: 86px;
   margin: 12px auto 0;
   display: grid;
-  grid-template-columns: minmax(260px, 0.7fr) minmax(200px, 0.5fr) minmax(520px, 1.45fr) 132px;
+  grid-template-columns: minmax(260px, 0.66fr) minmax(200px, 0.46fr) minmax(620px, 1.55fr) 132px;
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
@@ -471,13 +471,13 @@ button {
 
 .quote-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 7px;
 }
 
 .quote-metrics .metric strong {
-  font-size: 18px;
-  line-height: 26px;
+  font-size: 17px;
+  line-height: 25px;
 }
 
 .quote-source {

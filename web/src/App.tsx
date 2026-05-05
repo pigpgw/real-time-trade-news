@@ -220,9 +220,11 @@ interface MarketQuote {
   isRealtime: boolean;
   marketState: string;
   session: QuoteSession;
+  activeSession?: QuoteSession;
   activePrice?: number;
   activeChange?: number;
   activeChangePercent?: number;
+  activeTime?: string;
   regularPrice?: number;
   regularChange?: number;
   regularChangePercent?: number;
@@ -248,6 +250,8 @@ interface MarketQuote {
   extendedVolume?: number;
   generatedAt: string;
   cacheTtlMs: number;
+  nextSession?: QuoteSession;
+  nextSessionTime?: string;
   message?: string;
 }
 
@@ -827,8 +831,12 @@ function QuoteStrip({
   const change = quote?.activeChange;
   const changePercent = quote?.activeChangePercent;
   const currency = quote?.currency ?? 'USD';
-  const lastUpdatedAt = quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime ?? quote?.generatedAt;
-  const quoteStatus = quote ? quoteFreshnessLabel(quote, lastUpdatedAt) : '지연';
+  const lastTradeAt = quote?.activeTime ?? quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime;
+  const quoteStatus = quote ? quoteFreshnessLabel(quote) : '지연';
+  const priceContext = quote ? quotePriceContextLabel(quote) : '가격 대기';
+  const nextSession = quote?.nextSession && quote.nextSessionTime
+    ? `다음 ${quoteSessionLabel(quote.nextSession)} ${formatKoreaTime(quote.nextSessionTime)}`
+    : undefined;
 
   return (
     <section className={`quote-strip ${tone}`}>
@@ -840,7 +848,7 @@ function QuoteStrip({
         </div>
       </div>
       <div className="quote-price">
-        <small>현재 · {session}</small>
+        <small>{priceContext}</small>
         <strong>{price === undefined ? '-' : formatCurrency(price, quote?.currency ?? 'USD')}</strong>
         <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
       </div>
@@ -849,11 +857,13 @@ function QuoteStrip({
         <Metric label="프리마켓" valueText={formatMaybeCurrency(quote?.preMarketPrice, currency)} />
         <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
         <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
-        <Metric label="업데이트" valueText={quote && lastUpdatedAt ? formatAge(lastUpdatedAt) : '-'} />
+        <Metric label="체결" valueText={lastTradeAt ? formatAge(lastTradeAt) : '-'} />
+        <Metric label="수집" valueText={quote ? formatAge(quote.generatedAt) : '-'} />
       </div>
       <div className="quote-source">
         <span>{quoteStatus}</span>
         <small>{quote?.provider ?? 'quote'} · {quote?.exchange ?? 'US'}</small>
+        {nextSession && <small>{nextSession}</small>}
       </div>
     </section>
   );
@@ -1551,16 +1561,35 @@ function quoteSessionLabel(session: QuoteSession): string {
   return '확인중';
 }
 
-function quoteFreshnessLabel(quote: MarketQuote, lastUpdatedAt?: string): string {
-  if (!quote.isRealtime) return '지연';
-  if (!lastUpdatedAt) return '실시간';
+function quoteFreshnessLabel(quote: MarketQuote): string {
+  if (!quote.isRealtime) return '지연 수집';
 
-  const updatedAt = new Date(lastUpdatedAt).getTime();
-  if (!Number.isFinite(updatedAt)) return '실시간';
+  const collectedAt = new Date(quote.generatedAt).getTime();
+  if (!Number.isFinite(collectedAt)) return '수집중';
 
-  const ageMs = Date.now() - updatedAt;
+  const ageMs = Date.now() - collectedAt;
   const freshWindowMs = Math.max(60_000, quote.cacheTtlMs * 3);
-  return ageMs <= freshWindowMs ? '실시간' : '마지막 체결';
+  return ageMs <= freshWindowMs ? '수집중' : '수집 지연';
+}
+
+function quotePriceContextLabel(quote: MarketQuote): string {
+  const sessionLabel = quoteSessionLabel(quote.session);
+  if (quote.session === 'closed') {
+    const source = quote.activeSession && quote.activeSession !== 'regular'
+      ? `${quoteSessionLabel(quote.activeSession)} 마지막`
+      : '정규장 마지막';
+    return `${source} · ${sessionLabel}`;
+  }
+
+  return `현재 · ${sessionLabel}`;
+}
+
+function formatKoreaTime(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value));
 }
 
 function translatedTitle(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string {

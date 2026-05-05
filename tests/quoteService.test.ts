@@ -27,9 +27,10 @@ describe('quote service', () => {
           }
         }]
       }
-    }, 'SOXL');
+    }, 'SOXL', new Date('2026-05-04T21:00:00.000Z'));
 
     expect(quote.session).toBe('post');
+    expect(quote.activeSession).toBe('post');
     expect(quote.activePrice).toBe(126.3501);
     expect(quote.activeChange).toBe(-4.0499);
     expect(quote.activeChangePercent).toBe(-3.1058);
@@ -64,12 +65,46 @@ describe('quote service', () => {
           }
         }]
       }
-    }, 'SOXL');
+    }, 'SOXL', new Date('2026-05-04T10:00:00.000Z'));
 
     expect(quote.session).toBe('pre');
+    expect(quote.activeSession).toBe('pre');
     expect(quote.activePrice).toBe(129.10);
     expect(quote.preMarketPrice).toBe(129.10);
     expect(quote.preMarketChangePercent).toBe(-0.9969);
     expect(quote.postMarketPrice).toBeUndefined();
+  });
+
+  it('does not treat POST_MKT_PREV as live pre market between sessions', () => {
+    const quote = parseCnbcQuotePayload({
+      QuickQuoteResult: {
+        QuickQuote: [{
+          symbol: 'SOXL',
+          name: 'Direxion Daily Semiconductor Bull 3X Shares',
+          exchange: 'NYSE Arca',
+          currencyCode: 'USD',
+          last: '127.55',
+          change: '-2.85',
+          change_pct: '-2.1856',
+          realTime: 'true',
+          curmktstatus: 'POST_MKT_PREV',
+          ExtendedMktQuote: {
+            type: 'POST_MKT_PREV',
+            last: '126.3501',
+            fullchange: '-4.0499',
+            fullchange_pct: '-3.1058',
+            last_time_msec: '1777939198721'
+          }
+        }]
+      }
+    }, 'SOXL', new Date('2026-05-05T06:35:00.000Z'));
+
+    expect(quote.session).toBe('closed');
+    expect(quote.activeSession).toBe('post');
+    expect(quote.activePrice).toBe(126.3501);
+    expect(quote.preMarketPrice).toBeUndefined();
+    expect(quote.postMarketPrice).toBe(126.3501);
+    expect(quote.nextSession).toBe('pre');
+    expect(quote.nextSessionTime).toBe('2026-05-05T08:00:00.000Z');
   });
 });

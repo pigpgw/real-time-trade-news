@@ -10,9 +10,11 @@ export interface MarketQuote {
   isRealtime: boolean;
   marketState: string;
   session: QuoteSession;
+  activeSession?: QuoteSession;
   activePrice?: number;
   activeChange?: number;
   activeChangePercent?: number;
+  activeTime?: string;
   regularPrice?: number;
   regularChange?: number;
   regularChangePercent?: number;
@@ -38,5 +40,7 @@ export interface MarketQuote {
   extendedVolume?: number;
   generatedAt: string;
   cacheTtlMs: number;
+  nextSession?: QuoteSession;
+  nextSessionTime?: string;
   message?: string;
 }
