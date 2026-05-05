@@ -1,0 +1,51 @@
+# News Signal Monitor
+
+검색한 종목명, 티커, 지정학 이슈를 기준으로 국내외 뉴스를 실시간에 가깝게 모니터링하는 로컬 웹 앱입니다. 주가와 관심종목 기능은 제외하고 뉴스 감시, 원문 소스, 레버리지 리스크 요약, 한국시간 실적 캘린더에 집중합니다.
+
+## 실행
+
+```bash
+npm install
+npm run dev
+```
+
+- Web: http://127.0.0.1:5173
+- API: http://127.0.0.1:4000
+
+## 뉴스 소스
+
+- 키 없이 사용: Google News RSS, GDELT, BBC RSS, CNBC RSS, MarketWatch RSS, ABC News RSS, Al Jazeera RSS, SEC EDGAR
+- 키가 있으면 추가 사용: Naver Search API, NewsAPI
+- 해외 직접 RSS는 한국어 검색어를 일부 영어 키워드로 확장해서 원문 제목/요약을 필터링합니다.
+- 해외 원문 보강 검색은 Reuters, AP, CNBC, MarketWatch, Bloomberg, WSJ, BBC, Al Jazeera, CNN, Guardian, Sky News, France 24, DW, Politico, Axios, Barron's, Yahoo Finance, Investing.com, FT, Nikkei Asia 도메인을 후보로 두고, 쿼리 성격별 상위 10개만 검색해 호출량을 제한합니다.
+
+## 기사 상세와 번역
+
+- 뉴스 클릭 시 `GET /api/news/detail`로 공개 HTML 또는 RSS 요약에서 제목/본문 미리보기를 가져옵니다.
+- 외국어 기사는 한국어 번역을 먼저 보여주고, 원문은 접을 수 있게 둡니다.
+- Google News 중계 URL은 원문 본문을 직접 제공하지 않으므로 RSS 요약을 표시합니다. 원문검색/직접 RSS 항목은 공개 본문을 더 길게 표시합니다.
+
+## 수급·거래대금
+
+- `GET /api/market/rankings?market=KOSPI&type=turnover` 형식으로 거래대금, 급등, 외국인, 기관 탭을 제공합니다.
+- 현재 키 없이 동작하도록 Naver 모바일 증권 공개 JSON을 사용하고, 호출량을 줄이기 위해 60초 서버 캐시와 30초 React Query fresh window를 둡니다.
+- 외국인/기관 탭은 거래대금 상위 종목군의 최신 투자자별 순매수 수량을 붙여 정렬합니다. 전 종목 공식 랭킹은 KRX/KIS 키 연결 후 확장하는 구조입니다.
+
+## 실적 캘린더
+
+- `GET /api/earnings/calendar?symbols=NVDA,AMD,AAPL`로 한국시간 기준 캘린더를 제공합니다.
+- `FINNHUB_API_KEY`가 있으면 Finnhub 실적 캘린더를 우선 사용하고, `ALPHA_VANTAGE_API_KEY`가 있으면 보조로 사용합니다.
+- 키가 없으면 화면 구조 확인용 샘플 일정을 표시합니다. 샘플은 실제 투자 판단용 데이터가 아닙니다.
+- 장전 `BMO`는 미국 동부 08:00, 장후 `AMC`는 16:30 기준으로 한국시간을 추정합니다.
+
+## 실시간성 기준
+
+앱은 브라우저와 서버 사이에 SSE 연결을 유지하고 10초마다 자동 확인합니다. API 과호출을 막기 위해 공급자별 캐시를 둡니다: Google News는 약 20초, 해외 원문 도메인 검색은 약 60초, 직접 RSS는 약 45초, SEC는 약 5분 주기로 새로 가져옵니다. 다만 실제 업데이트 속도는 각 뉴스 RSS/API가 공개하는 갱신 주기를 따릅니다. 방송사 속보 수준의 초 단위 알림이 필요하면 유료 뉴스 와이어 또는 터미널이 필요합니다.
+
+프론트는 React Query를 사용해 초기 뉴스 조회와 실적 캘린더를 캐시합니다. 뉴스 화면은 SSE 이벤트가 들어올 때 즉시 병합해서 갱신하고, 실적 캘린더는 30분 `staleTime/refetchInterval`로 API 호출을 낮게 유지합니다.
+
+## UI 방향
+
+- 토스 TDS 공개 토큰을 기준으로 `grey50~900`, `blue500`, `red500` 계열을 CSS 변수로 두고 사용합니다.
+- 화면은 토스 앱처럼 높은 대비의 장식보다 흰 섹션, 낮은 경계선, 명확한 파란 액션 버튼, 큰 제목/본문/보조 텍스트 계층을 우선합니다.
+- 레버리지 대응 화면이므로 장식성 컴포넌트는 줄이고, 검색/위험 요약/뉴스 피드/기사 상세/수급 랭킹만 유지합니다.
