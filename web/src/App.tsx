@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
   AlertTriangle,
   Bell,
   CalendarDays,
@@ -12,6 +13,7 @@ import {
   Search,
   ShieldAlert,
   TrendingDown,
+  Zap,
   Wifi,
   WifiOff,
   X
@@ -178,6 +180,7 @@ interface RankingResult {
 }
 
 const examples = ['SOXL', 'TQQQ', 'Iran missile stocks', 'Strait of Hormuz oil', 'NVDA'];
+const scoutQueries = ['Nasdaq futures missile', 'Iran Israel attack oil', 'NVDA earnings', 'semiconductor sanctions'];
 const providerLabels: Record<NewsProviderId, string> = {
   'direct-rss': 'Direct',
   'source-search': 'Source',
@@ -252,6 +255,7 @@ export function App() {
     market: items.filter(isMarketImpact).length,
     direct: items.filter((item) => item.provider === 'direct-rss' || item.provider === 'source-search').length
   }), [items]);
+  const priorityItems = useMemo(() => topImpactItems(items, 4), [items]);
 
   const signal = useMemo(() => buildSignal(items, newItemsCount), [items, newItemsCount]);
   const providerHealth = useMemo(() => buildProviderHealth(statuses), [statuses]);
@@ -483,56 +487,15 @@ export function App() {
       )}
 
       <main className="terminal-layout">
-        <aside className="left-rail">
-          <section className={`risk-tile ${signal.level}`}>
-            <span className="tile-kicker">
-              <ShieldAlert size={14} aria-hidden />
-              빠른 판단
-            </span>
-            <strong>{signal.label}</strong>
-            <p>{signal.reason}</p>
-            <div className="risk-stats">
-              <Metric label="긴급" value={counts.high} tone={counts.high > 0 ? 'danger' : undefined} />
-              <Metric label="시장" value={counts.market} tone={counts.market > 0 ? 'danger' : undefined} />
-              <Metric label="원문" value={counts.direct} />
-              <Metric label="신규" value={newItemsCount} />
-            </div>
-          </section>
-
-          <div className="quick-list" aria-label="빠른 검색">
-            {examples.map((example) => (
-              <button
-                type="button"
-                key={example}
-                onClick={() => {
-                  setInput(example);
-                  void runSearch(example);
-                }}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-
-          <button className="notify-button" type="button" onClick={enableNotifications}>
-            <Bell size={17} aria-hidden />
-            {notificationEnabled ? '알림 켜짐' : '알림 켜기'}
-          </button>
-
-          <RankingPanel
-            result={rankingQuery.data}
-            isLoading={rankingQuery.isLoading}
-            market={rankingMarket}
-            type={rankingType}
-            selected={selectedRanking}
-            selectedSymbol={selectedRanking?.symbol}
-            onMarketChange={setRankingMarket}
-            onTypeChange={setRankingType}
-            onSelect={setSelectedRankingSymbol}
-          />
-
-          <EarningsMini result={earningsQuery.data} />
-        </aside>
+        <SignalBoard
+          signal={signal}
+          counts={counts}
+          priorityItems={priorityItems}
+          statuses={statuses}
+          providerHealth={providerHealth}
+          nextCheckLabel={secondsToNextCheck === undefined ? '대기' : `${secondsToNextCheck}s`}
+          onSelectNews={setSelectedNewsId}
+        />
 
         <section className="feed-panel">
           <div className="feed-head">
@@ -572,7 +535,22 @@ export function App() {
             {filteredItems.length === 0 ? (
               <div className="empty-state">
                 <Newspaper size={30} aria-hidden />
-                <span>{connectionState === 'connecting' ? '수집 중' : '뉴스 없음'}</span>
+                <span>{connectionState === 'connecting' ? '수집 중' : '현재 필터에 잡힌 뉴스가 없습니다'}</span>
+                <p>{providerHealth}. Google/GDELT 제한이 있으면 원문검색 또는 직접RSS가 회복될 때까지 대체 검색어를 돌려보세요.</p>
+                <div>
+                  {scoutQueries.slice(0, 3).map((query) => (
+                    <button
+                      type="button"
+                      key={query}
+                      onClick={() => {
+                        setInput(query);
+                        void runSearch(query);
+                      }}
+                    >
+                      {query}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               filteredItems.map((item) => (
@@ -601,8 +579,138 @@ export function App() {
             <span>{pollIntervalMs ? `${Math.round(pollIntervalMs / 1000)}초 주기` : '주기 계산 중'}</span>
           </div>
         </aside>
+
+        <aside className="context-rail">
+          <section className="action-panel">
+            <div className="section-title">
+              <Zap size={16} aria-hidden />
+              <div>
+                <h2>빠른 스카우트</h2>
+                <span>미장·지정학 우선</span>
+              </div>
+            </div>
+            <div className="quick-list" aria-label="빠른 검색">
+              {[...examples, ...scoutQueries].map((example) => (
+                <button
+                  type="button"
+                  key={example}
+                  onClick={() => {
+                    setInput(example);
+                    void runSearch(example);
+                  }}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+            <button className="notify-button" type="button" onClick={enableNotifications}>
+              <Bell size={17} aria-hidden />
+              {notificationEnabled ? '알림 켜짐' : '알림 켜기'}
+            </button>
+          </section>
+
+          <RankingPanel
+            result={rankingQuery.data}
+            isLoading={rankingQuery.isLoading}
+            market={rankingMarket}
+            type={rankingType}
+            selected={selectedRanking}
+            selectedSymbol={selectedRanking?.symbol}
+            onMarketChange={setRankingMarket}
+            onTypeChange={setRankingType}
+            onSelect={setSelectedRankingSymbol}
+          />
+
+          <EarningsMini result={earningsQuery.data} />
+          <SourceConsole statuses={statuses} />
+        </aside>
       </main>
     </div>
+  );
+}
+
+function SignalBoard({
+  signal,
+  counts,
+  priorityItems,
+  statuses,
+  providerHealth,
+  nextCheckLabel,
+  onSelectNews
+}: {
+  signal: ReturnType<typeof buildSignal>;
+  counts: { all: number; high: number; market: number; direct: number };
+  priorityItems: NewsItem[];
+  statuses: ProviderStatus[];
+  providerHealth: string;
+  nextCheckLabel: string;
+  onSelectNews: (id: string) => void;
+}) {
+  const sourceCounts = sourceStatusCounts(statuses);
+  const topItem = priorityItems[0];
+  const topImpact = topItem ? fallbackImpact(topItem) : undefined;
+
+  return (
+    <section className="signal-board">
+      <div className={`signal-card primary ${signal.level}`}>
+        <span className="tile-kicker">
+          <ShieldAlert size={14} aria-hidden />
+          Decision
+        </span>
+        <strong>{signal.label}</strong>
+        <p>{signal.reason}</p>
+        <div className="risk-stats">
+          <Metric label="긴급" value={counts.high} tone={counts.high > 0 ? 'danger' : undefined} />
+          <Metric label="시장" value={counts.market} tone={counts.market > 0 ? 'danger' : undefined} />
+          <Metric label="원문" value={counts.direct} />
+          <Metric label="전체" value={counts.all} />
+        </div>
+      </div>
+
+      <div className="signal-card queue">
+        <div className="section-title">
+          <Activity size={16} aria-hidden />
+          <div>
+            <h2>우선순위 큐</h2>
+            <span>{topImpact ? `최고 영향도 ${topImpact.score}` : '대기'}</span>
+          </div>
+        </div>
+        {priorityItems.length === 0 ? (
+          <div className="compact-empty">아직 선별된 뉴스가 없습니다.</div>
+        ) : (
+          <div className="priority-list">
+            {priorityItems.map((item) => {
+              const impact = fallbackImpact(item);
+              return (
+                <button type="button" key={item.id} onClick={() => onSelectNews(item.id)}>
+                  <span className={`impact-score small ${impact.level}`}>{impact.score}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>{item.sourceName} · {formatAge(item.publishedAt)}</small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="signal-card source">
+        <div className="section-title">
+          <Radio size={16} aria-hidden />
+          <div>
+            <h2>소스 상태</h2>
+            <span>{providerHealth}</span>
+          </div>
+        </div>
+        <div className="source-grid">
+          <Metric label="정상" value={sourceCounts.ok} />
+          <Metric label="오류" value={sourceCounts.error} tone={sourceCounts.error > 0 ? 'danger' : undefined} />
+          <Metric label="비활성" value={sourceCounts.disabled} />
+          <Metric label="다음" valueText={nextCheckLabel} />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -709,6 +817,31 @@ function EarningsMini({ result }: { result?: EarningsCalendarResult }) {
           <span>{formatEarningsTime(item)}</span>
         </div>
       ))}
+    </section>
+  );
+}
+
+function SourceConsole({ statuses }: { statuses: ProviderStatus[] }) {
+  if (statuses.length === 0) return null;
+
+  return (
+    <section className="source-console">
+      <div className="section-title">
+        <Wifi size={16} aria-hidden />
+        <div>
+          <h2>뉴스 소스</h2>
+          <span>장애 확인</span>
+        </div>
+      </div>
+      <div className="source-status-list">
+        {statuses.map((status) => (
+          <div className={`source-status-row ${status.status}`} key={status.id}>
+            <span>{status.label}</span>
+            <strong>{sourceStatusLabel(status.status)}</strong>
+            {status.message && <small>{status.message}</small>}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -830,11 +963,11 @@ function ImpactBreakdown({ impact }: { impact?: NewsImpact }) {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone?: 'danger' }) {
+function Metric({ label, value, valueText, tone }: { label: string; value?: number; valueText?: string; tone?: 'danger' }) {
   return (
     <div className={`metric ${tone ?? ''}`}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>{valueText ?? value ?? '-'}</strong>
     </div>
   );
 }
@@ -863,13 +996,16 @@ function NewsCard({
   const title = translatedTitle(item, translation, displayLanguage);
   const snippet = translatedSnippet(item, translation, displayLanguage);
   const impact = fallbackImpact(item);
+  const fresh = isFreshItem(item);
+  const primaryFactor = impact.factors[0];
 
   return (
-    <article className={`news-card ${item.severity} impact-${impact.level} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <article className={`news-card ${item.severity} impact-${impact.level} ${fresh ? 'fresh' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="news-topline">
-        <time>{formatDateTime(item.publishedAt)}</time>
+        <time>{formatAge(item.publishedAt)}</time>
         <span className="provider-chip">{providerLabels[item.provider]}</span>
         <span className={`impact-score small ${impact.level}`}>{impact.score}</span>
+        {fresh && <span className="fresh-chip">NEW</span>}
         {isMarketImpact(item) && <span className="impact-chip">시장영향</span>}
         {item.country && (
           <span className="country">
@@ -884,6 +1020,7 @@ function NewsCard({
       <div className="news-footer">
         <span className={`severity ${item.severity}`}>{severityLabel(item.severity)}</span>
         <span className={`delivery-chip ${impact.level}`}>{deliveryLabel(impact.deliveryMode)}</span>
+        {primaryFactor && <span className="factor-chip">{primaryFactor.label}</span>}
         <strong>{item.sourceName}</strong>
       </div>
     </article>
@@ -989,6 +1126,12 @@ function topImpactItem(items: NewsItem[]): NewsItem | undefined {
   return [...items].sort((a, b) => impactScore(b) - impactScore(a))[0];
 }
 
+function topImpactItems(items: NewsItem[], limit: number): NewsItem[] {
+  return [...items]
+    .sort((a, b) => impactScore(b) - impactScore(a) || new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, limit);
+}
+
 function impactScore(item?: NewsItem): number {
   return fallbackImpact(item).score;
 }
@@ -1043,6 +1186,21 @@ function buildProviderHealth(statuses: ProviderStatus[]): string {
   return error > 0 ? `소스 ${ok}/${statuses.length} · 오류 ${error}` : `소스 ${ok}/${statuses.length}`;
 }
 
+function sourceStatusCounts(statuses: ProviderStatus[]): { ok: number; error: number; disabled: number } {
+  return {
+    ok: statuses.filter((status) => status.status === 'ok').length,
+    error: statuses.filter((status) => status.status === 'error').length,
+    disabled: statuses.filter((status) => status.status === 'disabled').length
+  };
+}
+
+function sourceStatusLabel(status: ProviderStatus['status']): string {
+  if (status === 'ok') return '정상';
+  if (status === 'error') return '오류';
+  if (status === 'disabled') return '꺼짐';
+  return '대기';
+}
+
 function isMarketImpact(item: NewsItem): boolean {
   const text = `${item.title} ${item.snippet ?? ''} ${item.matchedKeywords.join(' ')}`.toLowerCase();
   return marketImpactTerms.some((term) => text.includes(term));
@@ -1082,6 +1240,19 @@ function formatDateTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(value));
+}
+
+function formatAge(value: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 1) return '방금';
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return formatDateTime(value);
+}
+
+function isFreshItem(item: NewsItem): boolean {
+  return Date.now() - new Date(item.publishedAt).getTime() <= 15 * 60 * 1000;
 }
 
 function formatKoreaDateTime(value: string): string {
