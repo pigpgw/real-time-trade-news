@@ -143,6 +143,15 @@ export function parseCnbcQuotePayload(payload: CnbcQuoteResponse, symbol: string
   const extendedChangePercent = toNumber(extended?.change_pct);
   const extendedFullChange = toNumber(extended?.fullchange);
   const extendedFullChangePercent = toNumber(extended?.fullchange_pct);
+  const extendedTime = parseMillis(extended?.last_time_msec ?? quote.last_time_msec) ?? parseDate(extended?.afthrs_last_time);
+  const preMarketPrice = session === 'pre' ? extendedPrice : undefined;
+  const preMarketChange = session === 'pre' ? extendedFullChange ?? extendedChange : undefined;
+  const preMarketChangePercent = session === 'pre' ? extendedFullChangePercent ?? extendedChangePercent : undefined;
+  const preMarketTime = session === 'pre' ? extendedTime : undefined;
+  const postMarketPrice = session === 'post' ? extendedPrice : undefined;
+  const postMarketChange = session === 'post' ? extendedFullChange ?? extendedChange : undefined;
+  const postMarketChangePercent = session === 'post' ? extendedFullChangePercent ?? extendedChangePercent : undefined;
+  const postMarketTime = session === 'post' ? extendedTime : undefined;
   const useExtended = (session === 'pre' || session === 'post') && extendedPrice !== undefined;
   const activePrice = useExtended ? extendedPrice : regularPrice;
   const activeChange = useExtended
@@ -171,7 +180,16 @@ export function parseCnbcQuotePayload(payload: CnbcQuoteResponse, symbol: string
     extendedPrice,
     extendedChange,
     extendedChangePercent,
-    extendedTime: parseMillis(extended?.last_time_msec ?? quote.last_time_msec) ?? parseDate(extended?.afthrs_last_time),
+    extendedTime,
+    extendedSession: useExtended ? session : undefined,
+    preMarketPrice,
+    preMarketChange,
+    preMarketChangePercent,
+    preMarketTime,
+    postMarketPrice,
+    postMarketChange,
+    postMarketChangePercent,
+    postMarketTime,
     previousClose,
     open: toNumber(quote.open),
     high: toNumber(quote.high),
@@ -219,6 +237,13 @@ async function fetchYahooChartQuote(symbol: string): Promise<MarketQuote> {
   const activePrice = last ?? result.meta.regularMarketPrice;
   const activeChange = computeChange(activePrice, previousClose);
   const activeChangePercent = computeChangePercent(activeChange, previousClose);
+  const session = yahooSession(result.meta.marketState);
+  const extendedPrice = activePrice !== result.meta.regularMarketPrice ? activePrice : undefined;
+  const extendedTime = timestamps.length > 0 ? new Date(timestamps[timestamps.length - 1] * 1000).toISOString() : undefined;
+  const preMarketPrice = session === 'pre' ? extendedPrice : undefined;
+  const preMarketTime = session === 'pre' ? extendedTime : undefined;
+  const postMarketPrice = session === 'post' ? extendedPrice : undefined;
+  const postMarketTime = session === 'post' ? extendedTime : undefined;
 
   return {
     symbol: result.meta.symbol ?? symbol,
@@ -228,14 +253,25 @@ async function fetchYahooChartQuote(symbol: string): Promise<MarketQuote> {
     provider: 'yahoo-chart',
     isRealtime: false,
     marketState: result.meta.marketState ?? 'UNKNOWN',
-    session: yahooSession(result.meta.marketState),
+    session,
     activePrice,
     activeChange,
     activeChangePercent,
     regularPrice: result.meta.regularMarketPrice,
     regularTime: result.meta.regularMarketTime ? new Date(result.meta.regularMarketTime * 1000).toISOString() : undefined,
-    extendedPrice: activePrice !== result.meta.regularMarketPrice ? activePrice : undefined,
-    extendedTime: timestamps.length > 0 ? new Date(timestamps[timestamps.length - 1] * 1000).toISOString() : undefined,
+    extendedPrice,
+    extendedChange: session === 'pre' || session === 'post' ? activeChange : undefined,
+    extendedChangePercent: session === 'pre' || session === 'post' ? activeChangePercent : undefined,
+    extendedTime,
+    extendedSession: session === 'pre' || session === 'post' ? session : undefined,
+    preMarketPrice,
+    preMarketChange: session === 'pre' ? activeChange : undefined,
+    preMarketChangePercent: session === 'pre' ? activeChangePercent : undefined,
+    preMarketTime,
+    postMarketPrice,
+    postMarketChange: session === 'post' ? activeChange : undefined,
+    postMarketChangePercent: session === 'post' ? activeChangePercent : undefined,
+    postMarketTime,
     previousClose,
     volume: lastNumber(quote?.volume),
     generatedAt: new Date().toISOString(),
@@ -258,6 +294,9 @@ async function fetchNasdaqQuote(symbol: string): Promise<MarketQuote> {
   const regularChange = toNumber(primary.netChange);
   const regularChangePercent = toNumber(primary.percentageChange);
   const secondaryPrice = toNumber(data.secondaryData?.lastSalePrice);
+  const secondaryChange = toNumber(data.secondaryData?.netChange);
+  const secondaryChangePercent = toNumber(data.secondaryData?.percentageChange);
+  const secondaryTime = parseDate(data.secondaryData?.lastTradeTimestamp);
   const session = data.marketStatus?.toLowerCase().includes('pre')
     ? 'pre'
     : data.marketStatus?.toLowerCase().includes('after')
@@ -276,16 +315,25 @@ async function fetchNasdaqQuote(symbol: string): Promise<MarketQuote> {
     marketState: data.marketStatus ?? 'UNKNOWN',
     session,
     activePrice: secondaryPrice ?? regularPrice,
-    activeChange: secondaryPrice !== undefined ? toNumber(data.secondaryData?.netChange) : regularChange,
-    activeChangePercent: secondaryPrice !== undefined ? toNumber(data.secondaryData?.percentageChange) : regularChangePercent,
+    activeChange: secondaryPrice !== undefined ? secondaryChange : regularChange,
+    activeChangePercent: secondaryPrice !== undefined ? secondaryChangePercent : regularChangePercent,
     regularPrice,
     regularChange,
     regularChangePercent,
     regularTime: parseDate(primary.lastTradeTimestamp),
     extendedPrice: secondaryPrice,
-    extendedChange: toNumber(data.secondaryData?.netChange),
-    extendedChangePercent: toNumber(data.secondaryData?.percentageChange),
-    extendedTime: parseDate(data.secondaryData?.lastTradeTimestamp),
+    extendedChange: secondaryChange,
+    extendedChangePercent: secondaryChangePercent,
+    extendedTime: secondaryTime,
+    extendedSession: session === 'pre' || session === 'post' ? session : undefined,
+    preMarketPrice: session === 'pre' ? secondaryPrice : undefined,
+    preMarketChange: session === 'pre' ? secondaryChange : undefined,
+    preMarketChangePercent: session === 'pre' ? secondaryChangePercent : undefined,
+    preMarketTime: session === 'pre' ? secondaryTime : undefined,
+    postMarketPrice: session === 'post' ? secondaryPrice : undefined,
+    postMarketChange: session === 'post' ? secondaryChange : undefined,
+    postMarketChangePercent: session === 'post' ? secondaryChangePercent : undefined,
+    postMarketTime: session === 'post' ? secondaryTime : undefined,
     volume: toNumber(primary.volume),
     generatedAt: new Date().toISOString(),
     cacheTtlMs: CACHE_TTL_MS,

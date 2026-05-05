@@ -231,6 +231,15 @@ interface MarketQuote {
   extendedChange?: number;
   extendedChangePercent?: number;
   extendedTime?: string;
+  extendedSession?: QuoteSession;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
+  preMarketTime?: string;
+  postMarketPrice?: number;
+  postMarketChange?: number;
+  postMarketChangePercent?: number;
+  postMarketTime?: string;
   previousClose?: number;
   open?: number;
   high?: number;
@@ -817,6 +826,9 @@ function QuoteStrip({
   const price = quote?.activePrice;
   const change = quote?.activeChange;
   const changePercent = quote?.activeChangePercent;
+  const currency = quote?.currency ?? 'USD';
+  const lastUpdatedAt = quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime ?? quote?.generatedAt;
+  const quoteStatus = quote ? quoteFreshnessLabel(quote, lastUpdatedAt) : '지연';
 
   return (
     <section className={`quote-strip ${tone}`}>
@@ -828,17 +840,19 @@ function QuoteStrip({
         </div>
       </div>
       <div className="quote-price">
+        <small>현재 · {session}</small>
         <strong>{price === undefined ? '-' : formatCurrency(price, quote?.currency ?? 'USD')}</strong>
         <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
       </div>
       <div className="quote-metrics">
-        <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, quote?.currency)} />
-        <Metric label="프리/애프터" valueText={formatMaybeCurrency(quote?.extendedPrice, quote?.currency)} />
+        <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, currency)} />
+        <Metric label="프리마켓" valueText={formatMaybeCurrency(quote?.preMarketPrice, currency)} />
+        <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
         <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
-        <Metric label="업데이트" valueText={quote ? formatAge(quote.extendedTime ?? quote.regularTime ?? quote.generatedAt) : '-'} />
+        <Metric label="업데이트" valueText={quote && lastUpdatedAt ? formatAge(lastUpdatedAt) : '-'} />
       </div>
       <div className="quote-source">
-        <span>{quote?.isRealtime ? 'real-time' : 'delayed'}</span>
+        <span>{quoteStatus}</span>
         <small>{quote?.provider ?? 'quote'} · {quote?.exchange ?? 'US'}</small>
       </div>
     </section>
@@ -1535,6 +1549,18 @@ function quoteSessionLabel(session: QuoteSession): string {
   if (session === 'post') return '애프터마켓';
   if (session === 'closed') return '장마감';
   return '확인중';
+}
+
+function quoteFreshnessLabel(quote: MarketQuote, lastUpdatedAt?: string): string {
+  if (!quote.isRealtime) return '지연';
+  if (!lastUpdatedAt) return '실시간';
+
+  const updatedAt = new Date(lastUpdatedAt).getTime();
+  if (!Number.isFinite(updatedAt)) return '실시간';
+
+  const ageMs = Date.now() - updatedAt;
+  const freshWindowMs = Math.max(60_000, quote.cacheTtlMs * 3);
+  return ageMs <= freshWindowMs ? '실시간' : '마지막 체결';
 }
 
 function translatedTitle(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string {

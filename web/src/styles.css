@@ -364,7 +364,7 @@ button {
   min-height: 86px;
   margin: 12px auto 0;
   display: grid;
-  grid-template-columns: minmax(260px, 0.75fr) minmax(200px, 0.5fr) minmax(420px, 1.2fr) 150px;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(200px, 0.5fr) minmax(520px, 1.45fr) 132px;
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
@@ -445,6 +445,14 @@ button {
   letter-spacing: 0;
 }
 
+.quote-price small {
+  display: block;
+  color: var(--grey500);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 800;
+}
+
 .quote-price span,
 .quote-source span {
   color: var(--grey600);
@@ -463,8 +471,13 @@ button {
 
 .quote-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
+}
+
+.quote-metrics .metric strong {
+  font-size: 18px;
+  line-height: 26px;
 }
 
 .quote-source {

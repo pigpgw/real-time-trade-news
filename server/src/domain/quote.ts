@@ -21,6 +21,15 @@ export interface MarketQuote {
   extendedChange?: number;
   extendedChangePercent?: number;
   extendedTime?: string;
+  extendedSession?: QuoteSession;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
+  preMarketTime?: string;
+  postMarketPrice?: number;
+  postMarketChange?: number;
+  postMarketChangePercent?: number;
+  postMarketTime?: string;
   previousClose?: number;
   open?: number;
   high?: number;
