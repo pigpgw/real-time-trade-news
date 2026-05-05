@@ -1,0 +1,33 @@
+export type QuoteSession = 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
+export type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
+
+export interface MarketQuote {
+  symbol: string;
+  name?: string;
+  exchange?: string;
+  currency: string;
+  provider: QuoteProvider;
+  isRealtime: boolean;
+  marketState: string;
+  session: QuoteSession;
+  activePrice?: number;
+  activeChange?: number;
+  activeChangePercent?: number;
+  regularPrice?: number;
+  regularChange?: number;
+  regularChangePercent?: number;
+  regularTime?: string;
+  extendedPrice?: number;
+  extendedChange?: number;
+  extendedChangePercent?: number;
+  extendedTime?: string;
+  previousClose?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  extendedVolume?: number;
+  generatedAt: string;
+  cacheTtlMs: number;
+  message?: string;
+}

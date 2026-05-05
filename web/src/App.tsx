@@ -33,6 +33,8 @@ type RankingMarket = 'KOSPI' | 'KOSDAQ' | 'US';
 type DisplayLanguage = 'ko' | 'en' | 'original';
 type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
+type QuoteSession = 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
+type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
 
 interface NewsImpactFactor {
   id: string;
@@ -179,6 +181,37 @@ interface RankingResult {
   items: RankingItem[];
 }
 
+interface MarketQuote {
+  symbol: string;
+  name?: string;
+  exchange?: string;
+  currency: string;
+  provider: QuoteProvider;
+  isRealtime: boolean;
+  marketState: string;
+  session: QuoteSession;
+  activePrice?: number;
+  activeChange?: number;
+  activeChangePercent?: number;
+  regularPrice?: number;
+  regularChange?: number;
+  regularChangePercent?: number;
+  regularTime?: string;
+  extendedPrice?: number;
+  extendedChange?: number;
+  extendedChangePercent?: number;
+  extendedTime?: string;
+  previousClose?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  extendedVolume?: number;
+  generatedAt: string;
+  cacheTtlMs: number;
+  message?: string;
+}
+
 const examples = ['SOXL', 'TQQQ', 'Iran missile stocks', 'Strait of Hormuz oil', 'NVDA'];
 const scoutQueries = ['Nasdaq futures missile', 'Iran Israel attack oil', 'NVDA earnings', 'semiconductor sanctions'];
 const providerLabels: Record<NewsProviderId, string> = {
@@ -217,6 +250,7 @@ export function App() {
   const [selectedRankingSymbol, setSelectedRankingSymbol] = useState<string>();
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchSeqRef = useRef(0);
+  const initialSearchStartedRef = useRef(false);
 
   useEffect(() => {
     setNotificationEnabled(typeof Notification !== 'undefined' && Notification.permission === 'granted');
@@ -300,6 +334,15 @@ export function App() {
     enabled: earningsSymbols.length > 0,
     staleTime: 30 * 60 * 1000,
     refetchInterval: 30 * 60 * 1000
+  });
+  const quoteSymbol = useMemo(() => inferQuoteSymbol(activeQuery || input), [activeQuery, input]);
+  const quoteQuery = useQuery({
+    queryKey: ['market-quote', quoteSymbol],
+    queryFn: ({ signal }) => fetchMarketQuote(quoteSymbol!, signal),
+    enabled: Boolean(quoteSymbol),
+    staleTime: 3_000,
+    refetchInterval: quoteSymbol ? 5_000 : false,
+    retry: 1
   });
 
   const runSearch = async (query: string) => {
@@ -435,6 +478,8 @@ export function App() {
   };
 
   useEffect(() => {
+    if (initialSearchStartedRef.current) return;
+    initialSearchStartedRef.current = true;
     void runSearch(initialQuery);
     // Restore the monitor immediately after reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -484,6 +529,15 @@ export function App() {
           displayLanguage={displayLanguage}
           onOpen={() => setSelectedNewsId(breakingAlert.id)}
           onClose={() => setBreakingAlert(undefined)}
+        />
+      )}
+
+      {quoteSymbol && (
+        <QuoteStrip
+          symbol={quoteSymbol}
+          quote={quoteQuery.data}
+          isLoading={quoteQuery.isLoading}
+          isError={quoteQuery.isError}
         />
       )}
 
@@ -710,6 +764,50 @@ function SignalBoard({
           <Metric label="비활성" value={sourceCounts.disabled} />
           <Metric label="다음" valueText={nextCheckLabel} />
         </div>
+      </div>
+    </section>
+  );
+}
+
+function QuoteStrip({
+  symbol,
+  quote,
+  isLoading,
+  isError
+}: {
+  symbol: string;
+  quote?: MarketQuote;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  const tone = quote ? (isNegativeNumber(quote.activeChangePercent) ? 'negative' : 'positive') : 'neutral';
+  const session = quote ? quoteSessionLabel(quote.session) : '가격 대기';
+  const price = quote?.activePrice;
+  const change = quote?.activeChange;
+  const changePercent = quote?.activeChangePercent;
+
+  return (
+    <section className={`quote-strip ${tone}`}>
+      <div className="quote-identity">
+        <span className={`session-pill ${quote?.session ?? 'unknown'}`}>{session}</span>
+        <div>
+          <strong>{quote?.symbol ?? symbol}</strong>
+          <small>{quote?.name ?? (isLoading ? '실시간 가격 수집 중' : isError ? '가격 수집 실패' : '미국 종목')}</small>
+        </div>
+      </div>
+      <div className="quote-price">
+        <strong>{price === undefined ? '-' : formatCurrency(price, quote?.currency ?? 'USD')}</strong>
+        <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
+      </div>
+      <div className="quote-metrics">
+        <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, quote?.currency)} />
+        <Metric label="프리/애프터" valueText={formatMaybeCurrency(quote?.extendedPrice, quote?.currency)} />
+        <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
+        <Metric label="업데이트" valueText={quote ? formatAge(quote.extendedTime ?? quote.regularTime ?? quote.generatedAt) : '-'} />
+      </div>
+      <div className="quote-source">
+        <span>{quote?.isRealtime ? 'real-time' : 'delayed'}</span>
+        <small>{quote?.provider ?? 'quote'} · {quote?.exchange ?? 'US'}</small>
       </div>
     </section>
   );
@@ -1089,6 +1187,12 @@ async function fetchMarketRanking(
   return response.json() as Promise<RankingResult>;
 }
 
+async function fetchMarketQuote(symbol: string, signal?: AbortSignal): Promise<MarketQuote> {
+  const response = await fetch(`/api/quotes/${encodeURIComponent(symbol)}`, { signal });
+  if (!response.ok) throw new Error(`가격 조회 실패: HTTP ${response.status}`);
+  return response.json() as Promise<MarketQuote>;
+}
+
 async function fetchEarningsCalendar(symbols: string[], signal?: AbortSignal): Promise<EarningsCalendarResult> {
   const response = await fetch(
     `/api/earnings/calendar?${new URLSearchParams({ symbols: symbols.join(',') }).toString()}`,
@@ -1113,6 +1217,34 @@ function inferEarningsSymbols(query: string): string[] {
     ['NVDA', 'AMD', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA'].forEach((symbol) => symbols.add(symbol));
   }
   return Array.from(symbols).slice(0, 12);
+}
+
+const knownQuoteSymbols = new Set([
+  'SOXL',
+  'TQQQ',
+  'SQQQ',
+  'QQQ',
+  'SPY',
+  'NVDA',
+  'AMD',
+  'AVGO',
+  'TSM',
+  'ASML',
+  'MU',
+  'AAPL',
+  'MSFT',
+  'AMZN',
+  'META',
+  'GOOGL',
+  'GOOG',
+  'TSLA'
+]);
+
+function inferQuoteSymbol(query: string): string | undefined {
+  const compact = query.trim().toUpperCase();
+  if (/^[A-Z0-9.=-]{1,12}$/.test(compact)) return compact;
+  const tokens = compact.match(/\b[A-Z][A-Z0-9.=-]{0,11}\b/g) ?? [];
+  return tokens.find((token) => knownQuoteSymbols.has(token));
 }
 
 function mergeNews(primary: NewsItem[], secondary: NewsItem[]): NewsItem[] {
@@ -1278,8 +1410,51 @@ function formatSignedRate(value?: string): string {
   return `${Number(clean) > 0 ? '+' : ''}${clean}%`;
 }
 
+function formatSignedPercent(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return '-';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function formatSignedNumber(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return '-';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function formatCurrency(value: number, currency = 'USD'): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4
+  }).format(value);
+}
+
+function formatMaybeCurrency(value?: number, currency = 'USD'): string {
+  return value === undefined ? '-' : formatCurrency(value, currency);
+}
+
+function formatCompactNumber(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return '-';
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1
+  }).format(value);
+}
+
 function isNegative(value?: string): boolean {
   return Boolean(value?.trim().startsWith('-'));
+}
+
+function isNegativeNumber(value?: number): boolean {
+  return value !== undefined && value < 0;
+}
+
+function quoteSessionLabel(session: QuoteSession): string {
+  if (session === 'pre') return '프리마켓';
+  if (session === 'regular') return '정규장';
+  if (session === 'post') return '애프터마켓';
+  if (session === 'closed') return '장마감';
+  return '확인중';
 }
 
 function translatedTitle(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string {

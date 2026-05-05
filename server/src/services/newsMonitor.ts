@@ -8,6 +8,7 @@ export class NewsMonitor {
   private statuses = new Map<NewsProviderId, ProviderStatus>();
   private cache = new Map<string, { expiresAt: number; result: NewsSearchResult }>();
   private providerCache = new Map<string, { expiresAt: number; items: NewsItem[]; fetchedAt: string }>();
+  private inFlight = new Map<string, Promise<NewsSearchResult>>();
 
   constructor(private readonly providers: NewsProvider[] = newsProviders) {
     for (const provider of providers) {
@@ -37,6 +38,22 @@ export class NewsMonitor {
     if (cached && cached.expiresAt > Date.now()) {
       return cached.result;
     }
+
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) return pending;
+
+    const request = this.executeSearch(normalizedQuery, lookbackHours, cacheKey).finally(() => {
+      this.inFlight.delete(cacheKey);
+    });
+    this.inFlight.set(cacheKey, request);
+    return request;
+  }
+
+  private async executeSearch(
+    normalizedQuery: string,
+    lookbackHours: number,
+    cacheKey: string
+  ): Promise<NewsSearchResult> {
 
     const enabledProviders = this.providers.filter((provider) => provider.enabled());
     const settled = await Promise.allSettled(

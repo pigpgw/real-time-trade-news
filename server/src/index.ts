@@ -6,6 +6,7 @@ import { getArticleDetail } from './services/articleDetail';
 import { getEarningsCalendar } from './services/earningsCalendar';
 import { getMarketRanking } from './services/rankingService';
 import { newsMonitor } from './services/newsMonitor';
+import { getMarketQuote } from './services/quoteService';
 import { translateNewsItems } from './services/translationService';
 
 const app = Fastify({
@@ -53,6 +54,10 @@ const translationBodySchema = z.object({
 const rankingQuerySchema = z.object({
   market: z.enum(['KOSPI', 'KOSDAQ', 'US']).default('KOSPI'),
   type: z.enum(['turnover', 'gainers', 'losers', 'foreign', 'institution']).default('turnover')
+});
+
+const quoteParamsSchema = z.object({
+  symbol: z.string().trim().regex(/^[A-Za-z0-9.=-]{1,12}$/)
 });
 
 app.get('/api/health', async () => ({
@@ -115,6 +120,22 @@ app.get('/api/market/rankings', async (request, reply) => {
   }
 
   return getMarketRanking(parsed.data.market, parsed.data.type);
+});
+
+app.get('/api/quotes/:symbol', async (request, reply) => {
+  const parsed = quoteParamsSchema.safeParse(request.params);
+  if (!parsed.success) {
+    return reply.status(400).send({ error: 'invalid quote symbol' });
+  }
+
+  try {
+    return await getMarketQuote(parsed.data.symbol);
+  } catch (error) {
+    return reply.status(502).send({
+      error: error instanceof Error ? error.message : String(error),
+      symbol: parsed.data.symbol.toUpperCase()
+    });
+  }
 });
 
 app.get('/api/news/stream', streamNews);
