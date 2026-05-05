@@ -311,9 +311,7 @@ export function App() {
   const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>();
-  const [lastCheckedAt, setLastCheckedAt] = useState<string>();
   const [nextCheckAt, setNextCheckAt] = useState<string>();
-  const [pollIntervalMs, setPollIntervalMs] = useState<number>();
   const [nowMs, setNowMs] = useState(Date.now());
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [error, setError] = useState<string>();
@@ -422,7 +420,7 @@ export function App() {
     queryFn: ({ signal }) => fetchMarketQuote(quoteSymbol!, signal),
     enabled: Boolean(quoteSymbol),
     staleTime: 1_000,
-    refetchInterval: quoteSymbol ? 10_000 : false,
+    refetchInterval: quoteSymbol ? 30_000 : false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     retry: 1
@@ -483,7 +481,6 @@ export function App() {
     setSelectedNewsId(undefined);
     setBreakingAlert(undefined);
     setLastUpdatedAt(undefined);
-    setLastCheckedAt(undefined);
     setNextCheckAt(undefined);
 
     try {
@@ -497,8 +494,6 @@ export function App() {
       setSelectedNewsId(result.items[0]?.id);
       setStatuses(result.statuses);
       setLastUpdatedAt(result.generatedAt);
-      setLastCheckedAt(result.generatedAt);
-      setPollIntervalMs(result.pollIntervalMs);
       setNextCheckAt(result.nextCheckAt);
       openStream(trimmed, searchSeq);
     } catch (err) {
@@ -527,8 +522,6 @@ export function App() {
       });
       setStatuses(payload.statuses);
       setLastUpdatedAt(payload.generatedAt);
-      setLastCheckedAt(payload.generatedAt);
-      setPollIntervalMs(payload.pollIntervalMs);
       setNextCheckAt(payload.nextCheckAt);
       setConnectionState('live');
     });
@@ -549,17 +542,13 @@ export function App() {
         notifyNewItems(payload.items);
       }
       setStatuses(payload.statuses);
-      setLastCheckedAt(payload.generatedAt);
       if (payload.items.length > 0) setLastUpdatedAt(payload.generatedAt);
-      setPollIntervalMs(payload.pollIntervalMs);
       setNextCheckAt(payload.nextCheckAt);
       setConnectionState('live');
     });
     stream.addEventListener('heartbeat', (event) => {
       if (searchSeq !== searchSeqRef.current) return;
       const payload = JSON.parse((event as MessageEvent).data) as HeartbeatEvent;
-      setLastCheckedAt(payload.now);
-      setPollIntervalMs(payload.pollIntervalMs);
       setNextCheckAt(payload.nextCheckAt);
     });
     stream.addEventListener('error', () => {
@@ -745,19 +734,6 @@ export function App() {
           </div>
         </section>
 
-        <aside className="detail-panel">
-          <ArticlePanel
-            item={selectedNews}
-            detail={articleQuery.data}
-            isLoading={articleQuery.isLoading}
-            displayLanguage={displayLanguage}
-          />
-          <div className="system-line">
-            <span>자동 확인 {lastCheckedAt ? formatDateTime(lastCheckedAt) : '-'}</span>
-            <span>{pollIntervalMs ? `${Math.round(pollIntervalMs / 1000)}초 주기` : '주기 계산 중'}</span>
-          </div>
-        </aside>
-
         <aside className="context-rail">
           <section className="action-panel">
             <div className="section-title">
@@ -874,6 +850,7 @@ function QuoteChart({
   const tone = isNegativeNumber(quote?.activeChangePercent) ? 'negative' : 'positive';
   const linePath = buildChartPath(displayCandles);
   const volumeBars = buildVolumeBars(displayCandles);
+  const stats = buildChartStats(displayCandles, quote, result?.previousClose, result?.currency ?? quote?.currency ?? 'USD');
 
   return (
     <section className={`quote-chart ${tone}`}>
@@ -894,6 +871,14 @@ function QuoteChart({
             </button>
           ))}
         </div>
+      </div>
+      <div className="chart-stats" aria-label="차트 주요 지표">
+        {stats.map((stat) => (
+          <span key={stat.label}>
+            <small>{stat.label}</small>
+            <strong>{stat.value}</strong>
+          </span>
+        ))}
       </div>
       <div className="chart-surface">
         {linePath ? (
@@ -1057,93 +1042,6 @@ function BreakingAlert({
   );
 }
 
-function ArticlePanel({
-  item,
-  detail,
-  isLoading,
-  displayLanguage
-}: {
-  item?: NewsItem;
-  detail?: ArticleDetail;
-  isLoading: boolean;
-  displayLanguage: DisplayLanguage;
-}) {
-  if (!item) {
-    return (
-      <section className="article-panel empty">
-        <Newspaper size={28} aria-hidden />
-        <span>뉴스를 선택하세요</span>
-      </section>
-    );
-  }
-  const impact = item.impact ?? detail?.impact;
-
-  return (
-    <section className="article-panel">
-      <div className="article-meta">
-        <span className={`severity ${item.severity}`}>{severityLabel(item.severity)}</span>
-        <strong>{item.sourceName}</strong>
-        <time>{formatDateTime(item.publishedAt)}</time>
-      </div>
-      <h2>{articleTitle(item, detail, displayLanguage)}</h2>
-      {displayLanguage !== 'original' && detail?.translated && <p className="original-title">{detail.title}</p>}
-      <ImpactBreakdown impact={impact} />
-      <div className="article-body">
-        {isLoading ? (
-          <span>본문과 번역을 가져오는 중</span>
-        ) : (
-          <p>{articleExcerpt(item, detail, displayLanguage)}</p>
-        )}
-      </div>
-      {detail?.message && <div className="detail-note">{detail.message}</div>}
-      {detail?.translated && detail.excerpt && (
-        <details>
-          <summary>원문 보기</summary>
-          <p>{detail.excerpt}</p>
-        </details>
-      )}
-      <a className="source-link" href={item.url} target="_blank" rel="noreferrer">
-        <ExternalLink size={16} aria-hidden />
-        원문 열기
-      </a>
-    </section>
-  );
-}
-
-function ImpactBreakdown({ impact }: { impact?: NewsImpact }) {
-  const resolved = resolveImpact(impact);
-
-  return (
-    <div className={`impact-panel ${resolved.level} effect-${resolved.positionEffect}`}>
-      <div className="impact-summary">
-        <span className={`impact-score ${resolved.level} effect-${resolved.positionEffect}`}>{resolved.score}</span>
-        <div>
-          <strong>{resolved.summary}</strong>
-          <span>{deliveryLabel(resolved.deliveryMode)} · 신뢰도 {resolved.confidence}% · {resolved.verification.label}</span>
-        </div>
-      </div>
-      <div className="impact-tags">
-        <span className={`position-effect ${resolved.positionEffect}`}>{resolved.positionLabel}</span>
-        <span>{positionBiasLabel(resolved.positionBias)}</span>
-        <span>{resolved.directionLabel} 재료</span>
-        <span>{resolved.priceReaction.label}</span>
-        <span>{truthRiskLabel(resolved.truthRisk)}</span>
-      </div>
-      {resolved.factors.length > 0 && (
-        <div className="impact-factors">
-          {resolved.factors.slice(0, 4).map((factor) => (
-            <div className="impact-factor" key={factor.id}>
-              <span>+{factor.score}</span>
-              <strong>{factor.label}</strong>
-              <em>{factor.reason}</em>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button className={active ? 'active' : ''} type="button" onClick={onClick}>
@@ -1232,6 +1130,7 @@ function NewsCard({
               뉴스 링크
             </a>
           </div>
+          <NewsDetailImpact impact={impact} />
           <p>{detailSummary}</p>
           {detail?.message && <div className="detail-note compact">{detail.message}</div>}
           {displayLanguage !== 'original' && detail?.translated && detail.excerpt && (
@@ -1243,6 +1142,16 @@ function NewsCard({
         </div>
       )}
     </article>
+  );
+}
+
+function NewsDetailImpact({ impact }: { impact: NewsImpact }) {
+  return (
+    <div className={`news-detail-impact ${impact.level} effect-${impact.positionEffect}`}>
+      <span>{impact.actionHint}</span>
+      <span>{impact.verification.label} · 신뢰도 {impact.confidence}%</span>
+      <span>{impact.priceReaction.reason}</span>
+    </div>
   );
 }
 
@@ -1339,23 +1248,45 @@ function inferEarningsSymbols(query: string): string[] {
   const normalized = query.toUpperCase();
   const symbols = new Set<string>();
   const tickerMatches = normalized.match(/\b[A-Z]{1,5}\b/g) ?? [];
-  for (const ticker of tickerMatches) symbols.add(ticker);
+  for (const ticker of tickerMatches) {
+    if (earningsSymbolUniverse.has(ticker)) symbols.add(ticker);
+  }
   if (normalized.includes('SOXL') || normalized.includes('SEMICON') || query.includes('반도체')) {
     ['NVDA', 'AMD', 'AVGO', 'TSM', 'ASML', 'MU'].forEach((symbol) => symbols.add(symbol));
   }
-  if (normalized.includes('TQQQ') || normalized.includes('NASDAQ') || query.includes('나스닥')) {
-    ['AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'NVDA', 'TSLA'].forEach((symbol) => symbols.add(symbol));
+  if (normalized.includes('SOXS')) {
+    ['NVDA', 'AMD', 'AVGO', 'TSM', 'ASML', 'MU'].forEach((symbol) => symbols.add(symbol));
   }
-  if (symbols.size === 0) {
-    ['NVDA', 'AMD', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA'].forEach((symbol) => symbols.add(symbol));
+  if (normalized.includes('TQQQ') || normalized.includes('SQQQ') || normalized.includes('NASDAQ') || query.includes('나스닥')) {
+    ['AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'NVDA', 'TSLA'].forEach((symbol) => symbols.add(symbol));
   }
   return Array.from(symbols).slice(0, 12);
 }
+
+const earningsSymbolUniverse = new Set([
+  'AAPL',
+  'AMD',
+  'AMZN',
+  'ASML',
+  'AVGO',
+  'GOOG',
+  'GOOGL',
+  'META',
+  'MSFT',
+  'MU',
+  'NVDA',
+  'TSLA',
+  'TSM'
+]);
 
 const knownQuoteSymbols = new Set([
   'SOXL',
   'TQQQ',
   'SQQQ',
+  'SOXS',
+  'UPRO',
+  'SPXL',
+  'SPXS',
   'QQQ',
   'SPY',
   'NVDA',
@@ -1383,13 +1314,27 @@ function inferQuoteSymbol(query: string): string | undefined {
 function mergeNews(primary: NewsItem[], secondary: NewsItem[]): NewsItem[] {
   const map = new Map<string, NewsItem>();
   for (const item of [...primary, ...secondary]) map.set(item.id, item);
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-  );
+  return Array.from(map.values()).sort(compareNewsForTrading);
 }
 
 function topImpactItem(items: NewsItem[]): NewsItem | undefined {
-  return [...items].sort((a, b) => impactScore(b) - impactScore(a))[0];
+  return [...items].sort(compareNewsForTrading)[0];
+}
+
+function compareNewsForTrading(a: NewsItem, b: NewsItem): number {
+  const priority = tradingPriority(b) - tradingPriority(a);
+  if (priority !== 0) return priority;
+  return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+}
+
+function tradingPriority(item: NewsItem): number {
+  const ageMinutes = Math.max(0, (Date.now() - new Date(item.publishedAt).getTime()) / 60_000);
+  const freshness = ageMinutes <= 5 ? 30 : ageMinutes <= 15 ? 24 : ageMinutes <= 60 ? 15 : ageMinutes <= 180 ? 8 : 0;
+  const impact = fallbackImpact(item);
+  const deliveryBoost = impact.deliveryMode === 'breaking' ? 16 : impact.deliveryMode === 'priority' ? 10 : 0;
+  const positionBoost = impact.positionEffect === 'unfavorable' ? 12 : impact.positionEffect === 'mixed' ? 8 : 0;
+  const sourceBoost = item.provider === 'direct-rss' || item.provider === 'source-search' || item.provider === 'sec' ? 6 : 0;
+  return impact.score * 2 + freshness + deliveryBoost + positionBoost + sourceBoost;
 }
 
 function impactScore(item?: NewsItem): number {
@@ -1480,18 +1425,6 @@ function deliveryLabel(mode: NewsDeliveryMode): string {
   if (mode === 'priority') return '우선 확인';
   if (mode === 'watch') return '관찰';
   return '일반';
-}
-
-function positionBiasLabel(positionBias: PositionBias): string {
-  if (positionBias === 'long') return '상승형 기준';
-  if (positionBias === 'inverse') return '인버스 기준';
-  return '포지션 미지정';
-}
-
-function truthRiskLabel(truthRisk: TruthRisk): string {
-  if (truthRisk === 'high') return '사실위험 높음';
-  if (truthRisk === 'medium') return '사실위험 중간';
-  return '사실위험 낮음';
 }
 
 function formatDateTime(value: string): string {
@@ -1660,6 +1593,28 @@ function buildVolumeBars(candles: QuoteCandle[]): Array<{ key: string; x: number
   });
 }
 
+function buildChartStats(
+  candles: QuoteCandle[],
+  quote: MarketQuote | undefined,
+  previousClose: number | undefined,
+  currency: string
+): Array<{ label: string; value: string }> {
+  const closes = candles.map((candle) => candle.close).filter(Number.isFinite);
+  const highs = candles.map((candle) => candle.high ?? candle.close).filter(Number.isFinite);
+  const lows = candles.map((candle) => candle.low ?? candle.close).filter(Number.isFinite);
+  const volumes = candles.map((candle) => candle.volume ?? 0);
+  const latest = quote?.activePrice ?? closes.at(-1);
+  const rangeChange = latest !== undefined && previousClose !== undefined ? ((latest - previousClose) / previousClose) * 100 : undefined;
+
+  return [
+    { label: '현재', value: formatMaybeCurrency(latest, currency) },
+    { label: '등락', value: formatSignedPercent(quote?.activeChangePercent ?? rangeChange) },
+    { label: '고가', value: formatMaybeCurrency(highs.length > 0 ? Math.max(...highs) : undefined, currency) },
+    { label: '저가', value: formatMaybeCurrency(lows.length > 0 ? Math.min(...lows) : undefined, currency) },
+    { label: '거래량', value: formatCompactNumber(quote?.dayMarketVolume ?? quote?.extendedVolume ?? quote?.volume ?? Math.max(0, ...volumes)) }
+  ];
+}
+
 function sampleCandles(candles: QuoteCandle[], limit: number): QuoteCandle[] {
   if (candles.length <= limit) return candles;
   const step = Math.ceil(candles.length / limit);
@@ -1723,13 +1678,6 @@ function translatedTitle(item: NewsItem, translation: NewsTranslation | undefine
 
 function translatedSnippet(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string | undefined {
   return displayLanguage === 'original' ? item.snippet : translation?.snippet ?? item.snippet;
-}
-
-function articleTitle(item: NewsItem, detail: ArticleDetail | undefined, displayLanguage: DisplayLanguage): string {
-  if (!detail) return item.title;
-  if (displayLanguage === 'original') return detail.title;
-  if (displayLanguage === 'ko') return detail.titleKo || detail.titleTranslated || detail.title;
-  return detail.titleTranslated || detail.title;
 }
 
 function articleExcerpt(item: NewsItem, detail: ArticleDetail | undefined, displayLanguage: DisplayLanguage): string {

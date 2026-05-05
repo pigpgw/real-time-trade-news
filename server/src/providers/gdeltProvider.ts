@@ -65,11 +65,14 @@ let nextAllowedRequestAt = 0;
 async function fetchGdelt(url: string, signal?: AbortSignal): Promise<GdeltResponse> {
   const now = Date.now();
   if (now < nextAllowedRequestAt) {
-    const seconds = Math.ceil((nextAllowedRequestAt - now) / 1000);
-    throw new Error(`GDELT cooldown ${seconds}s`);
+    const delayMs = nextAllowedRequestAt - now;
+    if (delayMs > 6_000) {
+      throw new Error(`GDELT rate limit ${Math.ceil(delayMs / 1000)}s`);
+    }
+    await waitForGdeltSlot(delayMs, signal);
   }
 
-  nextAllowedRequestAt = now + 5_500;
+  nextAllowedRequestAt = Date.now() + 5_500;
   let text: string;
   try {
     text = await fetchText(url, { signal });
@@ -90,6 +93,20 @@ async function fetchGdelt(url: string, signal?: AbortSignal): Promise<GdeltRespo
   }
 
   return JSON.parse(compact) as GdeltResponse;
+}
+
+function waitForGdeltSlot(delayMs: number, signal?: AbortSignal): Promise<void> {
+  const boundedDelay = Math.min(Math.max(delayMs, 0), 6_000);
+  if (boundedDelay === 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(new Error('GDELT request aborted'));
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, boundedDelay);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new Error('GDELT request aborted'));
+    }, { once: true });
+  });
 }
 
 function gdeltSearchQuery(query: string): string {

@@ -17,12 +17,19 @@ const staticExpansions: Record<string, string[]> = {
   마이크로소프트: ['Microsoft', 'MSFT'],
   반도체: ['semiconductor', 'chip', 'chips', 'HBM'],
   이란: ['Iran', 'Iranian'],
+  Iran: ['Iranian'],
   전쟁: ['war', 'conflict', 'attack', 'missile'],
+  war: ['conflict', 'attack', 'missile'],
   미사일: ['missile', 'missiles', 'rocket', 'ballistic missile'],
+  missile: ['missiles', 'rocket', 'ballistic missile'],
   드론: ['drone', 'UAV'],
+  drone: ['UAV'],
   공습: ['airstrike', 'strike', 'attack'],
+  attack: ['airstrike', 'strike'],
   호르무즈: ['Strait of Hormuz', 'Hormuz', 'Gulf shipping'],
+  Hormuz: ['Strait of Hormuz', 'Gulf shipping'],
   이스라엘: ['Israel', 'Israeli'],
+  Israel: ['Israeli'],
   중동: ['Middle East', 'Gulf'],
   러시아: ['Russia', 'Russian'],
   우크라이나: ['Ukraine', 'Ukrainian'],
@@ -119,7 +126,11 @@ export function matchesExpandedQuery(query: string, ...values: Array<string | un
   const text = values.join(' ').toLowerCase();
   const groups = expandQueryGroups(query);
   if (groups.length === 0) return false;
-  return groups.every((group) => group.some((term) => termMatches(text, term)));
+  const requiredGroups = groups.filter((group) => !group.every(isGenericContextTerm));
+  const groupsToMatch = requiredGroups.length > 0 ? requiredGroups : groups;
+  const matchedCount = groupsToMatch.filter((group) => group.some((term) => termMatches(text, term))).length;
+  if (groupsToMatch.length <= 2) return matchedCount === groupsToMatch.length;
+  return matchedCount >= Math.max(2, groupsToMatch.length - 1);
 }
 
 function expandToken(token: string): string[] {
@@ -135,4 +146,8 @@ function termMatches(lowerText: string, term: string): boolean {
   if (/[가-힣]/.test(lowerTerm)) return lowerText.includes(lowerTerm);
   const escaped = lowerTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(lowerText);
+}
+
+function isGenericContextTerm(term: string): boolean {
+  return /^(stock|stocks|market|markets|news|live|today|update|updates|주식|증시|뉴스)$/i.test(term.trim());
 }

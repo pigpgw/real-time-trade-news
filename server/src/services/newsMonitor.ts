@@ -68,8 +68,8 @@ export class NewsMonitor {
     const localStatuses: ProviderStatus[] = [];
     settled.forEach((result, index) => {
       if (result.status === 'fulfilled') {
-        const { provider, items, cached: providerCached } = result.value;
-        const status = this.successStatus(provider, `${items.length}건${providerCached ? ' / cached' : ' / live'}`);
+        const { provider, items, cached: providerCached, stale } = result.value;
+        const status = this.successStatus(provider, `${items.length}건${stale ? ' / stale' : providerCached ? ' / cached' : ' / live'}`);
         this.statuses.set(provider.id, status);
         localStatuses.push(status);
         allItems.push(...items);
@@ -82,7 +82,7 @@ export class NewsMonitor {
 
     this.refreshDisabledStatuses();
 
-    const dedupedItems = dedupeNews(allItems).slice(0, 150);
+    const dedupedItems = dedupeNews(allItems).slice(0, 180);
     const price = await priceContextPromise;
     const items = dedupedItems.map((item) => ({
       ...item,
@@ -92,7 +92,7 @@ export class NewsMonitor {
         peers: dedupedItems.filter((peer) => peer.id !== item.id),
         price
       })
-    }));
+    })).sort(compareNewsForTrading).slice(0, 150);
 
     const result = {
       query: normalizedQuery,
@@ -117,20 +117,30 @@ export class NewsMonitor {
     provider: NewsProvider,
     query: string,
     lookbackHours: number
-  ): Promise<{ provider: NewsProvider; items: NewsItem[]; cached: boolean }> {
+  ): Promise<{ provider: NewsProvider; items: NewsItem[]; cached: boolean; stale?: boolean }> {
     const cacheKey = `${provider.id}:${query}:${lookbackHours}`;
     const cached = this.providerCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return { provider, items: cached.items, cached: true };
     }
 
-    const items = await provider.fetch(query, { lookbackHours });
-    this.providerCache.set(cacheKey, {
-      items,
-      fetchedAt: new Date().toISOString(),
-      expiresAt: Date.now() + providerTtlMs(provider.id)
-    });
-    return { provider, items, cached: false };
+    try {
+      const items = await provider.fetch(query, { lookbackHours });
+      this.providerCache.set(cacheKey, {
+        items,
+        fetchedAt: new Date().toISOString(),
+        expiresAt: Date.now() + providerTtlMs(provider.id)
+      });
+      return { provider, items, cached: false };
+    } catch (error) {
+      if (cached && isTemporaryProviderLimit(error)) {
+        return { provider, items: cached.items, cached: true, stale: true };
+      }
+      if (provider.id === 'gdelt' && isTemporaryProviderLimit(error)) {
+        return { provider, items: [], cached: false, stale: true };
+      }
+      throw error;
+    }
   }
 
   private successStatus(provider: NewsProvider, message?: string): ProviderStatus {
@@ -197,6 +207,27 @@ function providerTtlMs(providerId: NewsProviderId): number {
   if (providerId === 'gdelt') return 180_000;
   if (providerId === 'sec') return 300_000;
   return 60_000;
+}
+
+function isTemporaryProviderLimit(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /cooldown|rate limit|too many requests|429/i.test(message);
+}
+
+function compareNewsForTrading(a: NewsItem, b: NewsItem): number {
+  const priority = tradingPriority(b) - tradingPriority(a);
+  if (priority !== 0) return priority;
+  return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+}
+
+function tradingPriority(item: NewsItem): number {
+  const impactScore = item.impact?.score ?? (item.severity === 'high' ? 65 : item.severity === 'medium' ? 42 : 18);
+  const ageMinutes = Math.max(0, (Date.now() - new Date(item.publishedAt).getTime()) / 60_000);
+  const freshness = ageMinutes <= 5 ? 30 : ageMinutes <= 15 ? 24 : ageMinutes <= 60 ? 15 : ageMinutes <= 180 ? 8 : 0;
+  const deliveryBoost = item.impact?.deliveryMode === 'breaking' ? 16 : item.impact?.deliveryMode === 'priority' ? 10 : 0;
+  const marketBoost = item.impact?.positionEffect === 'unfavorable' ? 12 : item.impact?.positionEffect === 'mixed' ? 8 : 0;
+  const sourceBoost = item.provider === 'direct-rss' || item.provider === 'source-search' || item.provider === 'sec' ? 6 : 0;
+  return impactScore * 2 + freshness + deliveryBoost + marketBoost + sourceBoost;
 }
 
 const quoteSymbols = new Set([

@@ -32,4 +32,9 @@ describe('query expansion', () => {
       'semiconductor',
     ]);
   });
+
+  it('does not let generic market words block urgent geopolitical matches', () => {
+    expect(matchesExpandedQuery('Iran missile stocks', 'Iran fires missiles near the Strait of Hormuz')).toBe(true);
+    expect(matchesExpandedQuery('Iran missile stocks', 'A generic stocks update with no geopolitical catalyst')).toBe(false);
+  });
 });
