@@ -888,7 +888,7 @@ function QuoteStrip({
         <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
       </div>
       <div className="quote-metrics">
-        <Metric label="주간거래" valueText={formatMaybeCurrency(quote?.dayMarketPrice, currency)} />
+        <Metric label="주간거래" valueText={formatDayMarketValue(quote, currency)} />
         <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, currency)} />
         <Metric label="프리마켓" valueText={formatMaybeCurrency(quote?.preMarketPrice, currency)} />
         <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
@@ -1619,8 +1619,22 @@ function quotePriceContextLabel(quote: MarketQuote): string {
     return `${source} · ${sessionLabel}`;
   }
 
+  if (quote.session === 'day' && quote.activeSession !== 'day') {
+    const source = quote.activeSession && quote.activeSession !== 'regular'
+      ? `${quoteSessionLabel(quote.activeSession)} 마지막`
+      : '정규장 마지막';
+    return `${source} · ${sessionLabel}`;
+  }
+
   if (quote.activeInterpolated) return `24h 차트 · ${sessionLabel}`;
   return `현재 · ${sessionLabel}`;
+}
+
+function formatDayMarketValue(quote: MarketQuote | undefined, currency: string): string {
+  if (!quote) return '-';
+  if (quote.dayMarketPrice !== undefined) return formatCurrency(quote.dayMarketPrice, currency);
+  if (quote.session === 'day' && quote.dayMarketInterpolated) return '체결 없음';
+  return '-';
 }
 
 function formatKoreaTime(value: string): string {

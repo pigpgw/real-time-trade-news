@@ -108,7 +108,7 @@ describe('quote service', () => {
     expect(quote.nextSessionTime).toBe('2026-05-05T08:00:00.000Z');
   });
 
-  it('uses 24 hour chart price during the Korean day market when available', () => {
+  it('ignores interpolated 24 hour chart points as current day market price', () => {
     const quote = parseCnbcQuotePayload({
       QuickQuoteResult: {
         QuickQuote: [{
@@ -144,10 +144,53 @@ describe('quote service', () => {
     });
 
     expect(enriched.session).toBe('day');
+    expect(enriched.activeSession).toBe('post');
+    expect(enriched.activePrice).toBe(126.3501);
+    expect(enriched.dayMarketPrice).toBeUndefined();
+    expect(enriched.dayMarketInterpolated).toBe(true);
+    expect(enriched.activeInterpolated).toBeUndefined();
+  });
+
+  it('uses a real 24 hour chart trade during the Korean day market when available', () => {
+    const quote = parseCnbcQuotePayload({
+      QuickQuoteResult: {
+        QuickQuote: [{
+          symbol: 'SOXL',
+          name: 'Direxion Daily Semiconductor Bull 3X Shares',
+          exchange: 'NYSE Arca',
+          currencyCode: 'USD',
+          last: '127.55',
+          change: '-2.85',
+          change_pct: '-2.1856',
+          realTime: 'true',
+          curmktstatus: 'POST_MKT_PREV',
+          ExtendedMktQuote: {
+            type: 'POST_MKT_PREV',
+            last: '126.3501',
+            fullchange: '-4.0499',
+            fullchange_pct: '-3.1058'
+          }
+        }]
+      }
+    }, 'SOXL', new Date('2026-05-05T06:35:00.000Z'));
+
+    const enriched = applyRobinhoodDayMarket(quote, {
+      previous_close_price: '127.55',
+      previous_close_time: '2026-05-04T20:00:00Z',
+      historicals: [{
+        begins_at: '2026-05-05T06:35:00Z',
+        close_price: '126.800000',
+        volume: 1200,
+        session: 'pre',
+        interpolated: false
+      }]
+    });
+
+    expect(enriched.session).toBe('day');
     expect(enriched.activeSession).toBe('day');
     expect(enriched.activePrice).toBe(126.8);
     expect(enriched.dayMarketPrice).toBe(126.8);
-    expect(enriched.activeInterpolated).toBe(true);
+    expect(enriched.activeInterpolated).toBe(false);
     expect(enriched.activeChange).toBeCloseTo(-0.75);
   });
 });

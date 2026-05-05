@@ -413,10 +413,23 @@ async function enrichWithRobinhoodDayMarket(quote: MarketQuote, symbol: string):
 export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHistoricalResponse): MarketQuote {
   const latest = lastHistorical(payload.historicals);
   const price = toNumber(latest?.close_price);
+  const isActualTrade = latest !== undefined && latest.interpolated !== true && (latest.volume ?? 0) > 0;
+
   if (price === undefined) {
     return {
       ...quote,
       marketState: `${quote.marketState}; DAY_MARKET_OPEN`
+    };
+  }
+
+  if (!isActualTrade) {
+    return {
+      ...quote,
+      marketState: `${quote.marketState}; DAY_MARKET_OPEN; DAY_MARKET_NO_TRADE`,
+      dayMarketTime: parseDate(latest?.begins_at) ?? parseDate(payload.open_time),
+      dayMarketVolume: latest?.volume,
+      dayMarketInterpolated: true,
+      message: [quote.message, 'Robinhood 24h chart interpolated; ignored as current price'].filter(Boolean).join(' + ')
     };
   }
 
