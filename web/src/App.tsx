@@ -736,6 +736,8 @@ export function App() {
                   translation={translations.get(item.id)}
                   displayLanguage={displayLanguage}
                   selected={selectedNews?.id === item.id}
+                  detail={selectedNews?.id === item.id ? articleQuery.data : undefined}
+                  isDetailLoading={selectedNews?.id === item.id && articleQuery.isLoading}
                   onSelect={() => setSelectedNewsId(item.id)}
                 />
               ))
@@ -1155,12 +1157,16 @@ function NewsCard({
   translation,
   displayLanguage,
   selected,
+  detail,
+  isDetailLoading,
   onSelect
 }: {
   item: NewsItem;
   translation?: NewsTranslation;
   displayLanguage: DisplayLanguage;
   selected: boolean;
+  detail?: ArticleDetail;
+  isDetailLoading: boolean;
   onSelect: () => void;
 }) {
   const title = translatedTitle(item, translation, displayLanguage);
@@ -1168,9 +1174,18 @@ function NewsCard({
   const impact = fallbackImpact(item);
   const fresh = isFreshItem(item);
   const primaryFactor = impact.factors[0];
+  const detailSummary = selected
+    ? isDetailLoading
+      ? '뉴스 요약을 가져오는 중입니다.'
+      : articleExcerpt(item, detail, displayLanguage)
+    : undefined;
 
   return (
-    <article className={`news-card ${item.severity} impact-${impact.level} effect-${impact.positionEffect} ${fresh ? 'fresh' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <article
+      className={`news-card ${item.severity} impact-${impact.level} effect-${impact.positionEffect} ${fresh ? 'fresh' : ''} ${selected ? 'selected' : ''}`}
+      onClick={onSelect}
+      aria-expanded={selected}
+    >
       <div className="news-topline">
         <time>{formatAge(item.publishedAt)}</time>
         <span className="provider-chip">{providerLabels[item.provider]}</span>
@@ -1205,6 +1220,28 @@ function NewsCard({
           원문
         </a>
       </div>
+      {selected && (
+        <div className="news-detail-card" onClick={(event) => event.stopPropagation()}>
+          <div className="news-detail-head">
+            <div>
+              <strong>뉴스 요약</strong>
+              <span>{detail ? `${item.sourceName} · ${formatDateTime(detail.fetchedAt)}` : item.sourceName}</span>
+            </div>
+            <a href={item.url} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} aria-hidden />
+              뉴스 링크
+            </a>
+          </div>
+          <p>{detailSummary}</p>
+          {detail?.message && <div className="detail-note compact">{detail.message}</div>}
+          {displayLanguage !== 'original' && detail?.translated && detail.excerpt && (
+            <details>
+              <summary>원문 요약 보기</summary>
+              <p>{detail.excerpt}</p>
+            </details>
+          )}
+        </div>
+      )}
     </article>
   );
 }
