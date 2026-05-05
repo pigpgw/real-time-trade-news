@@ -364,10 +364,10 @@ button {
   min-height: 86px;
   margin: 12px auto 0;
   display: grid;
-  grid-template-columns: minmax(250px, 0.62fr) minmax(190px, 0.42fr) minmax(700px, 1.7fr) 132px;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(240px, 0.65fr) minmax(260px, 1fr);
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 18px;
+  padding: 14px 16px;
   border: 1px solid var(--grey200);
   border-radius: 8px;
   background: #ffffff;
@@ -428,7 +428,7 @@ button {
 }
 
 .quote-identity small,
-.quote-source small {
+.quote-meta small {
   display: block;
   overflow: hidden;
   color: var(--grey500);
@@ -456,7 +456,7 @@ button {
 }
 
 .quote-price span,
-.quote-source span {
+.quote-meta span {
   color: var(--grey600);
   font-size: 13px;
   line-height: 19.5px;
@@ -471,24 +471,13 @@ button {
   color: var(--green600);
 }
 
-.quote-metrics {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.quote-metrics .metric strong {
-  font-size: 16px;
-  line-height: 25px;
-}
-
-.quote-source {
+.quote-meta {
   min-width: 0;
   justify-self: end;
   text-align: right;
 }
 
-.quote-source span {
+.quote-meta span {
   display: inline-flex;
   min-height: 26px;
   align-items: center;
@@ -509,7 +498,6 @@ button {
   display: grid;
   grid-template-columns: minmax(500px, 1.08fr) minmax(380px, 0.92fr) 320px;
   grid-template-areas:
-    "signal signal context"
     "chart chart context"
     "feed detail context";
   align-items: start;
@@ -526,13 +514,6 @@ button {
 .context-rail {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.signal-board {
-  grid-area: signal;
-  display: grid;
-  grid-template-columns: minmax(320px, 0.92fr) minmax(420px, 1.08fr);
   gap: 12px;
 }
 
@@ -554,7 +535,6 @@ button {
   grid-area: context;
 }
 
-.signal-card,
 .feed-panel,
 .article-panel,
 .action-panel,
@@ -566,30 +546,6 @@ button {
   border-radius: 8px;
 }
 
-.signal-card {
-  padding: 16px;
-}
-
-.signal-card.primary.calm {
-  background: #ffffff;
-}
-
-.signal-card.primary.watch {
-  background: var(--yellow50);
-  border-color: #ffe0a3;
-}
-
-.signal-card.primary.risk-off {
-  background: var(--blue50);
-  border-color: #cfe5ff;
-}
-
-.signal-card.primary.opportunity {
-  background: var(--red50);
-  border-color: #ffd4d6;
-}
-
-.tile-kicker,
 .section-title {
   display: flex;
   align-items: center;
@@ -598,117 +554,6 @@ button {
   font-size: 13px;
   line-height: 19.5px;
   font-weight: 700;
-}
-
-.signal-card.primary > strong {
-  display: block;
-  margin-top: 8px;
-  color: var(--grey900);
-  font-size: 30px;
-  line-height: 40px;
-  letter-spacing: 0;
-}
-
-.signal-card.primary.watch > strong {
-  color: var(--yellow600);
-}
-
-.signal-card.primary.opportunity > strong {
-  color: var(--red600);
-}
-
-.signal-card.primary.risk-off > strong {
-  color: var(--blue600);
-}
-
-.signal-card.primary p {
-  margin: 4px 0 14px;
-  color: var(--grey700);
-  font-size: 15px;
-  line-height: 22.5px;
-  font-weight: 600;
-}
-
-.risk-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.signal-card.queue {
-  min-height: 154px;
-}
-
-.priority-list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.priority-list button {
-  min-width: 0;
-  min-height: 42px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 7px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--grey50);
-  text-align: left;
-}
-
-.priority-list button:hover {
-  background: var(--blue50);
-}
-
-.priority-list strong {
-  display: block;
-  overflow: hidden;
-  color: var(--grey900);
-  font-size: 13px;
-  line-height: 19.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.priority-list small {
-  color: var(--grey500);
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 800;
-}
-
-.metric {
-  min-width: 0;
-  min-height: 56px;
-  padding: 9px;
-  border-radius: 8px;
-  background: var(--grey50);
-}
-
-.metric.danger {
-  background: #fff5f5;
-}
-
-.metric span {
-  display: block;
-  color: var(--grey600);
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 700;
-}
-
-.metric strong {
-  display: block;
-  margin-top: 2px;
-  color: var(--grey900);
-  font-size: 21px;
-  line-height: 31px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .quick-list {
@@ -1222,6 +1067,20 @@ button {
   margin-top: 10px;
 }
 
+.news-card-link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--blue600);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.news-card-link:hover {
+  text-decoration: underline;
+}
+
 .provider-chip,
 .impact-chip,
 .effect-chip,
@@ -1683,11 +1542,7 @@ button {
     grid-template-columns: minmax(240px, 1fr) minmax(180px, auto);
   }
 
-  .quote-metrics {
-    grid-column: 1 / -1;
-  }
-
-  .quote-source {
+  .quote-meta {
     justify-self: start;
     text-align: left;
   }
@@ -1695,14 +1550,9 @@ button {
   .terminal-layout {
     grid-template-columns: minmax(420px, 1fr) 340px;
     grid-template-areas:
-      "signal signal"
       "chart chart"
       "feed context"
       "detail detail";
-  }
-
-  .signal-board {
-    grid-template-columns: 1fr;
   }
 
   .detail-panel {
@@ -1718,7 +1568,6 @@ button {
   .terminal-layout {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "signal"
       "chart"
       "feed"
       "detail"
@@ -1742,10 +1591,6 @@ button {
   .quote-strip {
     width: calc(100% - 24px);
     grid-template-columns: 1fr;
-  }
-
-  .quote-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .breaking-open {
@@ -1784,7 +1629,6 @@ button {
     flex: 1;
   }
 
-  .risk-stats,
   .segmented.wrap {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

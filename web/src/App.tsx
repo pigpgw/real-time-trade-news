@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity,
   AlertTriangle,
   Bell,
   CalendarDays,
@@ -11,7 +10,6 @@ import {
   Radio,
   RefreshCw,
   Search,
-  ShieldAlert,
   TrendingDown,
   Zap,
   Wifi,
@@ -24,7 +22,6 @@ type NewsProviderId = 'direct-rss' | 'source-search' | 'gdelt' | 'google-news' |
 type NewsSeverity = 'low' | 'medium' | 'high';
 type FeedFilter = 'all' | 'high' | 'market' | NewsProviderId;
 type ConnectionState = 'idle' | 'connecting' | 'live' | 'error';
-type RiskLevel = 'calm' | 'watch' | 'risk-off' | 'opportunity';
 type EarningsReportTime = 'BMO' | 'AMC' | 'TAS' | 'UNKNOWN';
 type EarningsStatus = 'upcoming' | 'reported';
 type EarningsSource = 'finnhub' | 'alpha-vantage' | 'sample';
@@ -296,11 +293,11 @@ const providerLabels: Record<NewsProviderId, string> = {
 };
 
 const chartRanges: Array<{ value: ChartRange; label: string }> = [
-  { value: 'minute', label: '분' },
-  { value: 'day', label: '일' },
-  { value: 'week', label: '주' },
-  { value: 'month', label: '월' },
-  { value: 'year', label: '년' }
+  { value: 'minute', label: '분간' },
+  { value: 'day', label: '일간' },
+  { value: 'week', label: '주간' },
+  { value: 'month', label: '월간' },
+  { value: 'year', label: '연간' }
 ];
 
 export function App() {
@@ -317,7 +314,6 @@ export function App() {
   const [lastCheckedAt, setLastCheckedAt] = useState<string>();
   const [nextCheckAt, setNextCheckAt] = useState<string>();
   const [pollIntervalMs, setPollIntervalMs] = useState<number>();
-  const [newItemsCount, setNewItemsCount] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [error, setError] = useState<string>();
@@ -371,14 +367,9 @@ export function App() {
   const counts = useMemo(() => ({
     all: items.length,
     high: items.filter((item) => impactScore(item) >= 60).length,
-    market: items.filter(isMarketImpact).length,
-    direct: items.filter((item) => item.provider === 'direct-rss' || item.provider === 'source-search').length,
-    unfavorable: items.filter((item) => fallbackImpact(item).positionEffect === 'unfavorable').length,
-    favorable: items.filter((item) => fallbackImpact(item).positionEffect === 'favorable').length
+    market: items.filter(isMarketImpact).length
   }), [items]);
-  const priorityItems = useMemo(() => topImpactItems(items, 4), [items]);
 
-  const signal = useMemo(() => buildSignal(items, newItemsCount), [items, newItemsCount]);
   const providerHealth = useMemo(() => buildProviderHealth(statuses), [statuses]);
   const secondsToNextCheck = useMemo(() => {
     if (!nextCheckAt) return undefined;
@@ -488,7 +479,6 @@ export function App() {
     setItems([]);
     setSelectedNewsId(undefined);
     setBreakingAlert(undefined);
-    setNewItemsCount(0);
     setLastUpdatedAt(undefined);
     setLastCheckedAt(undefined);
     setNextCheckAt(undefined);
@@ -550,7 +540,6 @@ export function App() {
           setSelectedNewsId(topIncoming?.id ?? payload.items[0]?.id);
           return mergedItems;
         });
-        setNewItemsCount((count) => count + payload.items.length);
         if (topIncoming && impactScore(topIncoming) >= 60) {
           setBreakingAlert(topIncoming);
         }
@@ -670,13 +659,6 @@ export function App() {
       )}
 
       <main className="terminal-layout">
-        <SignalBoard
-          signal={signal}
-          counts={counts}
-          priorityItems={priorityItems}
-          onSelectNews={setSelectedNewsId}
-        />
-
         {quoteSymbol && (
           <QuoteChart
             result={chartQuery.data}
@@ -690,12 +672,12 @@ export function App() {
         <section className="feed-panel">
           <div className="feed-head">
             <div>
-              <h2>{activeQuery || '검색어를 입력하세요'}</h2>
+              <h2>수집 뉴스</h2>
               <p>
                 {lastUpdatedAt ? (
                   <>
                     <Clock3 size={14} aria-hidden />
-                    {formatDateTime(lastUpdatedAt)}
+                    {activeQuery || input} · {formatDateTime(lastUpdatedAt)}
                   </>
                 ) : '수집 대기'}
               </p>
@@ -818,68 +800,6 @@ export function App() {
   );
 }
 
-function SignalBoard({
-  signal,
-  counts,
-  priorityItems,
-  onSelectNews
-}: {
-  signal: ReturnType<typeof buildSignal>;
-  counts: { all: number; high: number; market: number; direct: number; unfavorable: number; favorable: number };
-  priorityItems: NewsItem[];
-  onSelectNews: (id: string) => void;
-}) {
-  const topItem = priorityItems[0];
-  const topImpact = topItem ? fallbackImpact(topItem) : undefined;
-
-  return (
-    <section className="signal-board">
-      <div className={`signal-card primary ${signal.level}`}>
-        <span className="tile-kicker">
-          <ShieldAlert size={14} aria-hidden />
-          Decision
-        </span>
-        <strong>{signal.label}</strong>
-        <p>{signal.reason}</p>
-        <div className="risk-stats">
-          <Metric label="불리" value={counts.unfavorable} tone={counts.unfavorable > 0 ? 'danger' : undefined} />
-          <Metric label="유리" value={counts.favorable} />
-          <Metric label="시장" value={counts.market} tone={counts.market > 0 ? 'danger' : undefined} />
-          <Metric label="원문" value={counts.direct} />
-        </div>
-      </div>
-
-      <div className="signal-card queue">
-        <div className="section-title">
-          <Activity size={16} aria-hidden />
-          <div>
-            <h2>우선순위 큐</h2>
-            <span>{topImpact ? `최고 영향도 ${topImpact.score}` : '대기'}</span>
-          </div>
-        </div>
-        {priorityItems.length === 0 ? (
-          <div className="compact-empty">아직 선별된 뉴스가 없습니다.</div>
-        ) : (
-          <div className="priority-list">
-            {priorityItems.map((item) => {
-              const impact = fallbackImpact(item);
-              return (
-                <button type="button" key={item.id} onClick={() => onSelectNews(item.id)}>
-                  <span className={`impact-score small ${impact.level} effect-${impact.positionEffect}`}>{impact.score}</span>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <small>{item.sourceName} · {formatAge(item.publishedAt)}</small>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function QuoteStrip({
   symbol,
   quote,
@@ -898,13 +818,7 @@ function QuoteStrip({
   const price = quote?.activePrice;
   const change = quote?.activeChange;
   const changePercent = quote?.activeChangePercent;
-  const currency = quote?.currency ?? 'USD';
   const lastTradeAt = quote?.activeTime ?? quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime;
-  const activityLabel = quote?.activeSession === 'day' && quote.dayMarketSource
-    ? '참고'
-    : quote?.activeInterpolated
-      ? '차트'
-      : '체결';
   const quoteStatus = quote ? quoteFreshnessLabel(quote) : '지연';
   const priceContext = quote ? quotePriceContextLabel(quote) : '가격 대기';
   const nextSession = quote?.nextSession && quote.nextSessionTime
@@ -925,18 +839,10 @@ function QuoteStrip({
         <strong>{price === undefined ? '-' : formatCurrency(price, quote?.currency ?? 'USD')}</strong>
         <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
       </div>
-      <div className="quote-metrics">
-        <Metric label="주간거래" valueText={formatDayMarketValue(quote, currency)} />
-        <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, currency)} />
-        <Metric label="프리마켓" valueText={formatMaybeCurrency(quote?.preMarketPrice, currency)} />
-        <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
-        <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
-        <Metric label={activityLabel} valueText={lastTradeAt ? formatAge(lastTradeAt) : '-'} />
-        <Metric label="수집" valueText={quote ? formatKoreaClockTime(quote.generatedAt) : '-'} />
-      </div>
-      <div className="quote-source">
+      <div className="quote-meta">
         <span>{quoteStatus}</span>
-        <small>{quote?.provider ?? 'quote'} · {quote?.exchange ?? 'US'}</small>
+        <small>거래량 {formatCompactNumber(quote?.volume)}</small>
+        {lastTradeAt && <small>체결 {formatAge(lastTradeAt)}</small>}
         {nextSession && <small>{nextSession}</small>}
       </div>
     </section>
@@ -1232,15 +1138,6 @@ function ImpactBreakdown({ impact }: { impact?: NewsImpact }) {
   );
 }
 
-function Metric({ label, value, valueText, tone }: { label: string; value?: number; valueText?: string; tone?: 'danger' }) {
-  return (
-    <div className={`metric ${tone ?? ''}`}>
-      <span>{label}</span>
-      <strong>{valueText ?? value ?? '-'}</strong>
-    </div>
-  );
-}
-
 function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button className={active ? 'active' : ''} type="button" onClick={onClick}>
@@ -1293,6 +1190,16 @@ function NewsCard({
         <span className="factor-chip">{impact.directionLabel}</span>
         {primaryFactor && <span className="factor-chip">{primaryFactor.label}</span>}
         <strong>{item.sourceName}</strong>
+        <a
+          className="news-card-link"
+          href={item.url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ExternalLink size={13} aria-hidden />
+          원문
+        </a>
       </div>
     </article>
   );
@@ -1444,12 +1351,6 @@ function topImpactItem(items: NewsItem[]): NewsItem | undefined {
   return [...items].sort((a, b) => impactScore(b) - impactScore(a))[0];
 }
 
-function topImpactItems(items: NewsItem[], limit: number): NewsItem[] {
-  return [...items]
-    .sort((a, b) => impactScore(b) - impactScore(a) || new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
-    .slice(0, limit);
-}
-
 function impactScore(item?: NewsItem): number {
   return fallbackImpact(item).score;
 }
@@ -1499,29 +1400,6 @@ function resolveImpact(impact?: NewsImpact, fallbackScore = 18): NewsImpact {
     affectedChannels: [],
     factors: []
   };
-}
-
-function buildSignal(items: NewsItem[], newItemsCount: number): {
-  level: RiskLevel;
-  label: string;
-  reason: string;
-} {
-  const now = Date.now();
-  const recentItems = items.filter((item) => now - new Date(item.publishedAt).getTime() <= 2 * 60 * 60 * 1000);
-  const recentHigh = recentItems.filter((item) => item.severity === 'high').length;
-  const topImpact = Math.max(0, ...recentItems.map(impactScore));
-  const adverseItems = recentItems.filter((item) => fallbackImpact(item).positionEffect === 'unfavorable');
-  const favorableItems = recentItems.filter((item) => fallbackImpact(item).positionEffect === 'favorable');
-  const adverseTop = Math.max(0, ...adverseItems.map(impactScore));
-  const favorableTop = Math.max(0, ...favorableItems.map(impactScore));
-  const marketHits = recentItems.filter(isMarketImpact).length;
-  const directHits = recentItems.filter((item) => item.provider === 'source-search' || item.provider === 'direct-rss').length;
-  const score = Math.round(topImpact / 10) + adverseItems.length * 3 + recentHigh * 2 + marketHits * 2 + directHits + Math.min(newItemsCount, 5);
-
-  if (adverseTop >= 70 || score >= 14) return { level: 'risk-off', label: '손절 경계', reason: `포지션 불리 최고 ${adverseTop}. 가격 하락/악재성 뉴스가 우선입니다.` };
-  if (favorableTop >= 70 && favorableTop > adverseTop + 10) return { level: 'opportunity', label: '상승 재료', reason: `포지션 유리 최고 ${favorableTop}. 호재와 가격 반응을 같이 확인하세요.` };
-  if (topImpact >= 60 || score >= 5) return { level: 'watch', label: 'WATCH', reason: `최고 영향도 ${topImpact}. 방향성 확인이 필요한 뉴스 밀도가 있습니다.` };
-  return { level: 'calm', label: 'CALM', reason: '최근 2시간 기준 급한 신호가 적습니다.' };
 }
 
 function buildProviderHealth(statuses: ProviderStatus[]): string {
@@ -1759,15 +1637,14 @@ function quoteSessionLabel(session: QuoteSession): string {
 }
 
 function quoteFreshnessLabel(quote: MarketQuote): string {
-  if (!quote.isRealtime) return '지연 수집';
   if (quote.activeInterpolated) return '24h 보간';
 
   const collectedAt = new Date(quote.generatedAt).getTime();
-  if (!Number.isFinite(collectedAt)) return '수집중';
+  if (!Number.isFinite(collectedAt)) return '갱신중';
 
   const ageMs = Date.now() - collectedAt;
   const freshWindowMs = Math.max(60_000, quote.cacheTtlMs * 3);
-  return ageMs <= freshWindowMs ? '수집중' : '수집 지연';
+  return ageMs <= freshWindowMs ? '방금 갱신' : '갱신 지연';
 }
 
 function quotePriceContextLabel(quote: MarketQuote): string {
@@ -1790,27 +1667,11 @@ function quotePriceContextLabel(quote: MarketQuote): string {
   return `현재 · ${sessionLabel}`;
 }
 
-function formatDayMarketValue(quote: MarketQuote | undefined, currency: string): string {
-  if (!quote) return '-';
-  if (quote.dayMarketPrice !== undefined) return formatCurrency(quote.dayMarketPrice, currency);
-  if (quote.session === 'day' && quote.dayMarketInterpolated) return '체결 없음';
-  return '-';
-}
-
 function formatKoreaTime(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
     hour: '2-digit',
     minute: '2-digit'
-  }).format(new Date(value));
-}
-
-function formatKoreaClockTime(value: string): string {
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
   }).format(new Date(value));
 }
 
