@@ -387,7 +387,10 @@ export function App() {
     queryKey: ['news-translations', displayLanguage, items.map((item) => item.id).slice(0, 30).join(',')],
     queryFn: ({ signal }) => fetchNewsTranslations(items.slice(0, 30), displayLanguage, signal),
     enabled: displayLanguage !== 'original' && items.length > 0,
-    staleTime: 12 * 60 * 60 * 1000
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 1
   });
   const translations = useMemo(() => {
     return new Map((translationQuery.data?.items ?? []).map((item) => [item.id, item]));
@@ -685,6 +688,7 @@ export function App() {
             <div className="live-panel">
               <span>{providerHealth}</span>
               <span>{secondsToNextCheck === undefined ? '대기' : `뉴스 ${secondsToNextCheck}s`}</span>
+              {displayLanguage !== 'original' && translationQuery.isFetching && <span>번역 중</span>}
               <button type="button" onClick={() => activeQuery && runSearch(activeQuery)}>
                 <RefreshCw size={16} aria-hidden />
                 즉시
