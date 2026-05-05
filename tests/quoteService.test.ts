@@ -157,7 +157,7 @@ describe('quote service', () => {
     expect(enriched.activeInterpolated).toBeUndefined();
   });
 
-  it('uses TradingView day market quote before Robinhood interpolated chart data', () => {
+  it('ignores stale TradingView scanner data as current day market price', () => {
     const quote = parseCnbcQuotePayload({
       QuickQuoteResult: {
         QuickQuote: [{
@@ -187,14 +187,11 @@ describe('quote service', () => {
       }]
     });
 
-    expect(enriched.provider).toBe('tradingview');
-    expect(enriched.activeSession).toBe('day');
-    expect(enriched.activePrice).toBe(132.2);
-    expect(enriched.activeChange).toBe(1.8);
-    expect(enriched.activeChangePercent).toBe(1.3803680981594961);
-    expect(enriched.activeTime).toBe(quote.generatedAt);
-    expect(enriched.dayMarketPrice).toBe(132.2);
-    expect(enriched.dayMarketSource).toBe('TradingView premarket/day scanner');
+    expect(enriched.provider).toBe('cnbc');
+    expect(enriched.activeSession).toBe('post');
+    expect(enriched.activePrice).toBe(126.3501);
+    expect(enriched.dayMarketPrice).toBeUndefined();
+    expect(enriched.message).toContain('TradingView scanner stale/out-of-session');
   });
 
   it('uses a real 24 hour chart trade during the Korean day market when available', () => {

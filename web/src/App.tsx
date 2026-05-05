@@ -1639,12 +1639,13 @@ function quoteSessionLabel(session: QuoteSession): string {
 function quoteFreshnessLabel(quote: MarketQuote): string {
   if (quote.activeInterpolated) return '24h 보간';
 
-  const collectedAt = new Date(quote.generatedAt).getTime();
-  if (!Number.isFinite(collectedAt)) return '갱신중';
+  const priceAt = new Date(quote.activeTime ?? quote.generatedAt).getTime();
+  if (!Number.isFinite(priceAt)) return quote.isRealtime ? '실시간 확인' : '공개 데이터';
 
-  const ageMs = Date.now() - collectedAt;
+  const ageMs = Date.now() - priceAt;
   const freshWindowMs = Math.max(60_000, quote.cacheTtlMs * 3);
-  return ageMs <= freshWindowMs ? '방금 갱신' : '갱신 지연';
+  if (ageMs <= freshWindowMs) return quote.isRealtime ? '실시간' : '공개 데이터';
+  return `마지막 체결 ${formatAge(new Date(priceAt).toISOString())}`;
 }
 
 function quotePriceContextLabel(quote: MarketQuote): string {

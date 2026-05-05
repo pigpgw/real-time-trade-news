@@ -242,7 +242,7 @@ export function parseCnbcQuotePayload(payload: CnbcQuoteResponse, symbol: string
     exchange: quote.exchange,
     currency: quote.currencyCode ?? 'USD',
     provider: 'cnbc',
-    isRealtime: quote.realTime === 'true',
+    isRealtime: false,
     marketState,
     session,
     activeSession,
@@ -407,7 +407,7 @@ async function fetchNasdaqQuote(symbol: string): Promise<MarketQuote> {
     exchange: data.exchange,
     currency: 'USD',
     provider: 'nasdaq',
-    isRealtime: Boolean(primary.isRealTime),
+    isRealtime: false,
     marketState: data.marketStatus ?? 'UNKNOWN',
     session,
     activeSession: secondaryPrice !== undefined ? extendedSession : 'regular',
@@ -510,6 +510,15 @@ export function applyTradingViewDayMarket(quote: MarketQuote, payload: TradingVi
   const change = toNumber(row[4]);
   const volume = typeof row[5] === 'number' ? row[5] : toNumber(row[5]);
   const time = typeof row[6] === 'number' ? new Date(row[6] * 1000).toISOString() : undefined;
+  const currentSession = typeof row[7] === 'string' ? row[7] : undefined;
+  const updateTime = typeof row[8] === 'number' ? new Date(row[8] * 1000).toISOString() : undefined;
+
+  if (!isFreshTradingViewDayMarketQuote(quote, time, updateTime, currentSession)) {
+    return {
+      ...quote,
+      message: [quote.message, 'TradingView scanner stale/out-of-session; ignored as current price'].filter(Boolean).join(' + ')
+    };
+  }
 
   return {
     ...quote,
@@ -531,6 +540,26 @@ export function applyTradingViewDayMarket(quote: MarketQuote, payload: TradingVi
     dayMarketSource: 'TradingView premarket/day scanner',
     message: [quote.message, 'TradingView premarket/day scanner'].filter(Boolean).join(' + ')
   };
+}
+
+function isFreshTradingViewDayMarketQuote(
+  quote: MarketQuote,
+  quoteTime?: string,
+  updateTime?: string,
+  currentSession?: string
+): boolean {
+  if (currentSession === 'out_of_session') return false;
+
+  const generatedAt = new Date(quote.generatedAt).getTime();
+  const quoteMs = quoteTime ? new Date(quoteTime).getTime() : NaN;
+  const updateMs = updateTime ? new Date(updateTime).getTime() : NaN;
+  const freshestSourceMs = Math.max(
+    Number.isFinite(quoteMs) ? quoteMs : 0,
+    Number.isFinite(updateMs) ? updateMs : 0
+  );
+
+  if (!Number.isFinite(generatedAt) || freshestSourceMs <= 0) return false;
+  return Math.abs(generatedAt - freshestSourceMs) <= 15 * 60 * 1000;
 }
 
 export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHistoricalResponse): MarketQuote {
@@ -565,7 +594,7 @@ export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHi
   return {
     ...quote,
     marketState: `${quote.marketState}; DAY_MARKET_OPEN`,
-    isRealtime: true,
+    isRealtime: false,
     activeSession: 'day',
     activePrice: price,
     activeChange: change,
