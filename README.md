@@ -16,7 +16,7 @@ News Signal Monitor는 3배 레버리지 ETF, 미장 개별주, 반도체/유가
 
 ![News Signal Monitor dashboard](docs/screenshots/dashboard.png)
 
-`SOXL` 검색 예시입니다. 상단에서 현재 프리마켓/정규장 가격과 차트를 보고, 중앙 뉴스 카드에서 요약·원문 링크·영향 판단을 바로 확인합니다.
+대시보드 예시입니다. 현재 버전은 상단 가격/차트와 중앙 뉴스 카드의 요약·원문 링크·영향 판단을 우선하도록 단순화했습니다.
 
 ## 핵심 화면
 
