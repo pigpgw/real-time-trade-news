@@ -1,5 +1,5 @@
 export type QuoteSession = 'day' | 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
-export type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq' | 'tradingview';
+export type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq' | 'tradingview' | 'robinhood';
 
 export interface MarketQuote {
   symbol: string;

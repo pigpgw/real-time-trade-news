@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRobinhoodDayMarket, applyTradingViewDayMarket, parseCnbcQuotePayload } from '../server/src/services/quoteService';
+import { applyRobinhoodDayMarket, applyRobinhoodQuote, applyTradingViewDayMarket, parseCnbcQuotePayload } from '../server/src/services/quoteService';
 
 describe('quote service', () => {
   it('uses extended market quote as active price during post market', () => {
@@ -237,5 +237,72 @@ describe('quote service', () => {
     expect(enriched.dayMarketPrice).toBe(126.8);
     expect(enriched.activeInterpolated).toBe(false);
     expect(enriched.activeChange).toBeCloseTo(-0.75);
+  });
+
+  it('uses Robinhood non-regular quote when it is fresher than the base quote', () => {
+    const quote = parseCnbcQuotePayload({
+      QuickQuoteResult: {
+        QuickQuote: [{
+          symbol: 'SOXL',
+          name: 'Direxion Daily Semiconductor Bull 3X Shares',
+          exchange: 'NYSE Arca',
+          currencyCode: 'USD',
+          last: '127.55',
+          change: '-2.85',
+          change_pct: '-2.1856',
+          realTime: 'true',
+          curmktstatus: 'PRE_MKT'
+        }]
+      }
+    }, 'SOXL', new Date('2026-05-05T08:00:05.000Z'));
+
+    const enriched = applyRobinhoodQuote(quote, {
+      symbol: 'SOXL',
+      last_non_reg_trade_price: '129.660000',
+      venue_last_non_reg_trade_time: '2026-05-05T08:00:00.382309114Z'
+    });
+
+    expect(enriched.provider).toBe('robinhood');
+    expect(enriched.session).toBe('pre');
+    expect(enriched.activeSession).toBe('pre');
+    expect(enriched.activePrice).toBe(129.66);
+    expect(enriched.activeTime).toBe('2026-05-05T08:00:00.382Z');
+    expect(enriched.activeChange).toBeCloseTo(2.11);
+    expect(enriched.activeChangePercent).toBeCloseTo(1.6543);
+  });
+
+  it('ignores stale Robinhood non-regular quotes during Korean day market', () => {
+    const quote = parseCnbcQuotePayload({
+      QuickQuoteResult: {
+        QuickQuote: [{
+          symbol: 'SOXL',
+          name: 'Direxion Daily Semiconductor Bull 3X Shares',
+          exchange: 'NYSE Arca',
+          currencyCode: 'USD',
+          last: '127.55',
+          change: '-2.85',
+          change_pct: '-2.1856',
+          realTime: 'true',
+          curmktstatus: 'POST_MKT_PREV',
+          ExtendedMktQuote: {
+            type: 'POST_MKT_PREV',
+            last: '126.3501',
+            change: '-1.1999',
+            change_pct: '-0.9407',
+            last_time_msec: '1777939198721'
+          }
+        }]
+      }
+    }, 'SOXL', new Date('2026-05-05T06:35:00.000Z'));
+
+    const enriched = applyRobinhoodQuote(quote, {
+      symbol: 'SOXL',
+      last_non_reg_trade_price: '126.350100',
+      venue_last_non_reg_trade_time: '2026-05-04T23:59:58.721220861Z'
+    });
+
+    expect(enriched.provider).toBe('cnbc');
+    expect(enriched.activeSession).toBe('post');
+    expect(enriched.activePrice).toBe(126.3501);
   });
 });

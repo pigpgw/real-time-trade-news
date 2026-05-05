@@ -125,6 +125,24 @@ interface RobinhoodHistoricalResponse {
   }>;
 }
 
+interface RobinhoodQuoteResponse {
+  symbol?: string;
+  ask_price?: string;
+  ask_size?: number;
+  venue_ask_time?: string;
+  bid_price?: string;
+  bid_size?: number;
+  venue_bid_time?: string;
+  last_trade_price?: string;
+  venue_last_trade_time?: string;
+  last_extended_hours_trade_price?: string;
+  last_non_reg_trade_price?: string;
+  venue_last_non_reg_trade_time?: string;
+  previous_close?: string;
+  adjusted_previous_close?: string;
+  updated_at?: string;
+}
+
 interface TradingViewScanResponse {
   data?: Array<{
     s?: string;
@@ -153,6 +171,7 @@ export async function getMarketQuote(symbol: string): Promise<MarketQuote> {
     .catch(() => fetchNasdaqQuote(normalized))
     .then((quote) => enrichWithTradingViewDayMarket(quote, normalized))
     .then((quote) => enrichWithRobinhoodDayMarket(quote, normalized))
+    .then((quote) => enrichWithRobinhoodQuote(quote, normalized))
     .then((quote) => {
       cache.set(normalized, { expiresAt: Date.now() + CACHE_TTL_MS, quote });
       return quote;
@@ -460,6 +479,21 @@ async function enrichWithRobinhoodDayMarket(quote: MarketQuote, symbol: string):
   }
 }
 
+async function enrichWithRobinhoodQuote(quote: MarketQuote, symbol: string): Promise<MarketQuote> {
+  if (!['day', 'pre', 'post'].includes(quote.session)) return quote;
+
+  try {
+    const payload = await fetchJson<RobinhoodQuoteResponse>(
+      `https://api.robinhood.com/marketdata/quotes/${encodeURIComponent(symbol)}/`,
+      { headers },
+      5_000
+    );
+    return applyRobinhoodQuote(quote, payload);
+  } catch {
+    return quote;
+  }
+}
+
 async function enrichWithTradingViewDayMarket(quote: MarketQuote, symbol: string): Promise<MarketQuote> {
   if (quote.session !== 'day') return quote;
 
@@ -611,6 +645,77 @@ export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHi
   };
 }
 
+export function applyRobinhoodQuote(quote: MarketQuote, payload: RobinhoodQuoteResponse): MarketQuote {
+  const price = toNumber(payload.last_non_reg_trade_price ?? payload.last_extended_hours_trade_price);
+  const time = parseDate(payload.venue_last_non_reg_trade_time) ?? parseDate(payload.updated_at);
+  if (price === undefined || !isFreshRobinhoodQuote(quote, time)) return quote;
+
+  const session = quote.session === 'day' ? 'day' : quote.session === 'pre' ? 'pre' : 'post';
+  const previous = quote.regularPrice ?? quote.previousClose ?? toNumber(payload.previous_close ?? payload.adjusted_previous_close);
+  const change = computeChange(price, previous);
+  const changePercent = computeChangePercent(change, previous);
+  const base: MarketQuote = {
+    ...quote,
+    symbol: payload.symbol ?? quote.symbol,
+    provider: 'robinhood',
+    isRealtime: false,
+    marketState: `${quote.marketState}; ROBINHOOD_NON_REG`,
+    activeSession: session,
+    activePrice: price,
+    activeChange: change,
+    activeChangePercent: changePercent,
+    activeTime: time,
+    activeInterpolated: false,
+    extendedPrice: price,
+    extendedChange: change,
+    extendedChangePercent: changePercent,
+    extendedTime: time,
+    extendedSession: session === 'day' ? undefined : session,
+    message: [quote.message, 'Robinhood quote last_non_reg_trade_price'].filter(Boolean).join(' + ')
+  };
+
+  if (session === 'day') {
+    return {
+      ...base,
+      dayMarketPrice: price,
+      dayMarketChange: change,
+      dayMarketChangePercent: changePercent,
+      dayMarketTime: time,
+      dayMarketInterpolated: false,
+      dayMarketSource: 'Robinhood quote last_non_reg_trade_price'
+    };
+  }
+
+  if (session === 'pre') {
+    return {
+      ...base,
+      preMarketPrice: price,
+      preMarketChange: change,
+      preMarketChangePercent: changePercent,
+      preMarketTime: time
+    };
+  }
+
+  return {
+    ...base,
+    postMarketPrice: price,
+    postMarketChange: change,
+    postMarketChangePercent: changePercent,
+    postMarketTime: time
+  };
+}
+
+function isFreshRobinhoodQuote(quote: MarketQuote, quoteTime?: string): boolean {
+  if (!quoteTime) return false;
+  const generatedAt = new Date(quote.generatedAt).getTime();
+  const quoteMs = new Date(quoteTime).getTime();
+  if (!Number.isFinite(generatedAt) || !Number.isFinite(quoteMs)) return false;
+
+  const activeMs = quote.activeTime ? new Date(quote.activeTime).getTime() : NaN;
+  const isNewerThanActive = !Number.isFinite(activeMs) || quoteMs >= activeMs;
+  return isNewerThanActive && Math.abs(generatedAt - quoteMs) <= 20 * 60 * 1000;
+}
+
 function normalizeSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (!/^[A-Z0-9.=-]{1,12}$/.test(normalized)) throw new Error('invalid quote symbol');
@@ -738,7 +843,8 @@ function parseMillis(value?: string): string | undefined {
 
 function parseDate(value?: string): string | undefined {
   if (!value) return undefined;
-  const time = new Date(value).getTime();
+  const normalized = value.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:?\d{2})$/, '.$1$2');
+  const time = new Date(normalized).getTime();
   return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
