@@ -164,26 +164,28 @@ export function parseCnbcQuotePayload(payload: CnbcQuoteResponse, symbol: string
   const extendedPrice = toNumber(extended?.last);
   const extendedChange = toNumber(extended?.change);
   const extendedChangePercent = toNumber(extended?.change_pct);
-  const extendedFullChange = toNumber(extended?.fullchange);
-  const extendedFullChangePercent = toNumber(extended?.fullchange_pct);
   const extendedTime = parseMillis(extended?.last_time_msec ?? quote.last_time_msec) ?? parseDate(extended?.afthrs_last_time);
   const extendedSession = reportedSession === 'pre' || reportedSession === 'post' ? reportedSession : undefined;
   const preMarketPrice = extendedSession === 'pre' ? extendedPrice : undefined;
-  const preMarketChange = extendedSession === 'pre' ? extendedFullChange ?? extendedChange : undefined;
-  const preMarketChangePercent = extendedSession === 'pre' ? extendedFullChangePercent ?? extendedChangePercent : undefined;
+  const preMarketChange = extendedSession === 'pre' ? extendedChange ?? computeChange(extendedPrice, previousClose) : undefined;
+  const preMarketChangePercent = extendedSession === 'pre' ? extendedChangePercent ?? computeChangePercent(preMarketChange, previousClose) : undefined;
   const preMarketTime = extendedSession === 'pre' ? extendedTime : undefined;
   const postMarketPrice = extendedSession === 'post' ? extendedPrice : undefined;
-  const postMarketChange = extendedSession === 'post' ? extendedFullChange ?? extendedChange : undefined;
-  const postMarketChangePercent = extendedSession === 'post' ? extendedFullChangePercent ?? extendedChangePercent : undefined;
+  const postMarketChange = extendedSession === 'post' ? extendedChange ?? computeChange(extendedPrice, regularPrice) : undefined;
+  const postMarketChangePercent = extendedSession === 'post' ? extendedChangePercent ?? computeChangePercent(postMarketChange, regularPrice) : undefined;
   const postMarketTime = extendedSession === 'post' ? extendedTime : undefined;
   const useExtended = extendedSession !== undefined && extendedPrice !== undefined;
   const activeSession = useExtended ? extendedSession : 'regular';
   const activePrice = useExtended ? extendedPrice : regularPrice;
   const activeChange = useExtended
-    ? extendedFullChange ?? computeChange(extendedPrice, previousClose)
+    ? extendedSession === 'post'
+      ? postMarketChange
+      : preMarketChange
     : regularChange;
   const activeChangePercent = useExtended
-    ? extendedFullChangePercent ?? computeChangePercent(activeChange, previousClose)
+    ? extendedSession === 'post'
+      ? postMarketChangePercent
+      : preMarketChangePercent
     : regularChangePercent;
 
   return {

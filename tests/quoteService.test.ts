@@ -32,11 +32,11 @@ describe('quote service', () => {
     expect(quote.session).toBe('post');
     expect(quote.activeSession).toBe('post');
     expect(quote.activePrice).toBe(126.3501);
-    expect(quote.activeChange).toBe(-4.0499);
-    expect(quote.activeChangePercent).toBe(-3.1058);
+    expect(quote.activeChange).toBe(-1.1999);
+    expect(quote.activeChangePercent).toBe(-0.9407);
     expect(quote.regularPrice).toBe(127.55);
     expect(quote.postMarketPrice).toBe(126.3501);
-    expect(quote.postMarketChangePercent).toBe(-3.1058);
+    expect(quote.postMarketChangePercent).toBe(-0.9407);
     expect(quote.preMarketPrice).toBeUndefined();
     expect(quote.extendedVolume).toBe(983795);
   });
@@ -71,7 +71,7 @@ describe('quote service', () => {
     expect(quote.activeSession).toBe('pre');
     expect(quote.activePrice).toBe(129.10);
     expect(quote.preMarketPrice).toBe(129.10);
-    expect(quote.preMarketChangePercent).toBe(-0.9969);
+    expect(quote.preMarketChangePercent).toBe(1.2152);
     expect(quote.postMarketPrice).toBeUndefined();
   });
 
@@ -91,6 +91,8 @@ describe('quote service', () => {
           ExtendedMktQuote: {
             type: 'POST_MKT_PREV',
             last: '126.3501',
+            change: '-1.1999',
+            change_pct: '-0.9407',
             fullchange: '-4.0499',
             fullchange_pct: '-3.1058',
             last_time_msec: '1777939198721'
@@ -102,6 +104,8 @@ describe('quote service', () => {
     expect(quote.session).toBe('day');
     expect(quote.activeSession).toBe('post');
     expect(quote.activePrice).toBe(126.3501);
+    expect(quote.activeChange).toBe(-1.1999);
+    expect(quote.activeChangePercent).toBe(-0.9407);
     expect(quote.preMarketPrice).toBeUndefined();
     expect(quote.postMarketPrice).toBe(126.3501);
     expect(quote.nextSession).toBe('pre');
@@ -124,6 +128,8 @@ describe('quote service', () => {
           ExtendedMktQuote: {
             type: 'POST_MKT_PREV',
             last: '126.3501',
+            change: '-1.1999',
+            change_pct: '-0.9407',
             fullchange: '-4.0499',
             fullchange_pct: '-3.1058'
           }
@@ -167,6 +173,8 @@ describe('quote service', () => {
           ExtendedMktQuote: {
             type: 'POST_MKT_PREV',
             last: '126.3501',
+            change: '-1.1999',
+            change_pct: '-0.9407',
             fullchange: '-4.0499',
             fullchange_pct: '-3.1058'
           }
