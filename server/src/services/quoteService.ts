@@ -1,4 +1,5 @@
 import type { MarketQuote, QuoteSession } from '../domain/quote';
+import { config } from '../config';
 import { fetchJson } from '../providers/http';
 
 interface CnbcQuoteResponse {
@@ -113,7 +114,7 @@ interface RobinhoodHistoricalResponse {
   }>;
 }
 
-const CACHE_TTL_MS = 5_000;
+const CACHE_TTL_MS = Math.max(500, config.quoteCacheTtlMs);
 const cache = new Map<string, { expiresAt: number; quote: MarketQuote }>();
 const inFlight = new Map<string, Promise<MarketQuote>>();
 const headers = {

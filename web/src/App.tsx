@@ -299,6 +299,7 @@ export function App() {
   const [rankingMarket, setRankingMarket] = useState<RankingMarket>('US');
   const [selectedRankingSymbol, setSelectedRankingSymbol] = useState<string>();
   const eventSourceRef = useRef<EventSource | null>(null);
+  const quoteEventSourceRef = useRef<EventSource | null>(null);
   const searchSeqRef = useRef(0);
   const initialSearchStartedRef = useRef(false);
 
@@ -307,7 +308,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    return () => eventSourceRef.current?.close();
+    return () => {
+      eventSourceRef.current?.close();
+      quoteEventSourceRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -392,10 +396,33 @@ export function App() {
     queryKey: ['market-quote', quoteSymbol],
     queryFn: ({ signal }) => fetchMarketQuote(quoteSymbol!, signal),
     enabled: Boolean(quoteSymbol),
-    staleTime: 3_000,
-    refetchInterval: quoteSymbol ? 5_000 : false,
+    staleTime: 1_000,
+    refetchInterval: quoteSymbol ? 10_000 : false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     retry: 1
   });
+
+  useEffect(() => {
+    quoteEventSourceRef.current?.close();
+    if (!quoteSymbol) return undefined;
+
+    const stream = new EventSource(`/api/quotes/${encodeURIComponent(quoteSymbol)}/stream`);
+    quoteEventSourceRef.current = stream;
+
+    stream.addEventListener('quote', (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as MarketQuote;
+      queryClient.setQueryData<MarketQuote>(['market-quote', quoteSymbol], payload);
+    });
+    stream.addEventListener('error', () => {
+      void queryClient.invalidateQueries({ queryKey: ['market-quote', quoteSymbol] });
+    });
+
+    return () => {
+      stream.close();
+      if (quoteEventSourceRef.current === stream) quoteEventSourceRef.current = null;
+    };
+  }, [queryClient, quoteSymbol]);
 
   const runSearch = async (query: string) => {
     const trimmed = query.trim();
@@ -867,7 +894,7 @@ function QuoteStrip({
         <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
         <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
         <Metric label={activityLabel} valueText={lastTradeAt ? formatAge(lastTradeAt) : '-'} />
-        <Metric label="수집" valueText={quote ? formatAge(quote.generatedAt) : '-'} />
+        <Metric label="수집" valueText={quote ? formatKoreaClockTime(quote.generatedAt) : '-'} />
       </div>
       <div className="quote-source">
         <span>{quoteStatus}</span>
@@ -1601,6 +1628,15 @@ function formatKoreaTime(value: string): string {
     timeZone: 'Asia/Seoul',
     hour: '2-digit',
     minute: '2-digit'
+  }).format(new Date(value));
+}
+
+function formatKoreaClockTime(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
   }).format(new Date(value));
 }
 

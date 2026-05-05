@@ -138,8 +138,69 @@ app.get('/api/quotes/:symbol', async (request, reply) => {
   }
 });
 
+app.get('/api/quotes/:symbol/stream', streamQuote);
 app.get('/api/news/stream', streamNews);
 app.get('/api/stream', streamNews);
+
+async function streamQuote(request: FastifyRequest, reply: FastifyReply) {
+  const parsed = quoteParamsSchema.safeParse(request.params);
+  if (!parsed.success) {
+    return reply.status(400).send({ error: 'invalid quote symbol' });
+  }
+
+  const symbol = parsed.data.symbol.toUpperCase();
+  const intervalMs = Math.max(1_000, config.quotePollIntervalMs);
+  let closed = false;
+  let timer: NodeJS.Timeout | undefined;
+
+  reply.hijack();
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  const send = (event: string, payload: unknown) => {
+    reply.raw.write(`event: ${event}\n`);
+    reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const poll = async () => {
+    if (closed) return;
+    try {
+      const quote = await getMarketQuote(symbol);
+      send('quote', {
+        ...quote,
+        pollIntervalMs: intervalMs,
+        nextCheckAt: new Date(Date.now() + intervalMs).toISOString()
+      });
+    } catch (error) {
+      send('error', {
+        symbol,
+        message: error instanceof Error ? error.message : String(error),
+        nextCheckAt: new Date(Date.now() + intervalMs).toISOString()
+      });
+    }
+  };
+
+  request.raw.on('close', () => {
+    closed = true;
+    if (timer) clearInterval(timer);
+  });
+
+  await poll();
+  if (closed) return;
+  timer = setInterval(() => {
+    send('heartbeat', {
+      symbol,
+      now: new Date().toISOString(),
+      pollIntervalMs: intervalMs,
+      nextCheckAt: new Date(Date.now() + intervalMs).toISOString()
+    });
+    void poll();
+  }, intervalMs);
+}
 
 async function streamNews(request: FastifyRequest, reply: FastifyReply) {
   const parsed = searchQuerySchema.safeParse(request.query);
