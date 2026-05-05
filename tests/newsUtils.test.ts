@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dedupeNews, isRecent, parseGdeltDate, scoreNews, stripHtml } from '../server/src/domain/newsUtils';
+import { compactQuery, dedupeNews, isRecent, parseGdeltDate, scoreNews, stripHtml } from '../server/src/domain/newsUtils';
 import type { NewsItem } from '../server/src/domain/news';
 
 describe('news utilities', () => {
@@ -11,6 +11,10 @@ describe('news utilities', () => {
 
   it('normalizes provider markup', () => {
     expect(stripHtml('<b>삼성전자</b> &amp; 엔비디아')).toBe('삼성전자 & 엔비디아');
+  });
+
+  it('normalizes known ticker casing without uppercasing normal words', () => {
+    expect(compactQuery('soxl iran missile')).toBe('SOXL iran missile');
   });
 
   it('parses GDELT timestamps', () => {

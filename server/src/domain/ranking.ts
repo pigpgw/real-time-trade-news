@@ -1,5 +1,5 @@
 export type RankingType = 'turnover' | 'gainers' | 'losers' | 'foreign' | 'institution';
-export type RankingMarket = 'KOSPI' | 'KOSDAQ';
+export type RankingMarket = 'KOSPI' | 'KOSDAQ' | 'US';
 
 export interface RankingItem {
   symbol: string;
@@ -22,7 +22,7 @@ export interface RankingItem {
 
 export interface RankingResult {
   generatedAt: string;
-  source: 'naver-mobile' | 'sample';
+  source: 'naver-mobile' | 'yahoo-finance' | 'sample';
   market: RankingMarket;
   type: RankingType;
   cacheTtlMs: number;

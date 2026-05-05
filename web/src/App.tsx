@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   Bell,
   CalendarDays,
   Clock3,
@@ -12,7 +13,8 @@ import {
   ShieldAlert,
   TrendingDown,
   Wifi,
-  WifiOff
+  WifiOff,
+  X
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -25,7 +27,28 @@ type EarningsReportTime = 'BMO' | 'AMC' | 'TAS' | 'UNKNOWN';
 type EarningsStatus = 'upcoming' | 'reported';
 type EarningsSource = 'finnhub' | 'alpha-vantage' | 'sample';
 type RankingType = 'turnover' | 'gainers' | 'losers' | 'foreign' | 'institution';
-type RankingMarket = 'KOSPI' | 'KOSDAQ';
+type RankingMarket = 'KOSPI' | 'KOSDAQ' | 'US';
+type DisplayLanguage = 'ko' | 'en' | 'original';
+type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
+type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
+
+interface NewsImpactFactor {
+  id: string;
+  label: string;
+  score: number;
+  reason: string;
+}
+
+interface NewsImpact {
+  score: number;
+  level: NewsImpactLevel;
+  label: string;
+  deliveryMode: NewsDeliveryMode;
+  confidence: number;
+  summary: string;
+  affectedChannels: string[];
+  factors: NewsImpactFactor[];
+}
 
 interface NewsItem {
   id: string;
@@ -40,6 +63,7 @@ interface NewsItem {
   country?: string;
   severity: NewsSeverity;
   matchedKeywords: string[];
+  impact?: NewsImpact;
 }
 
 interface ProviderStatus {
@@ -70,12 +94,31 @@ interface ArticleDetail {
   sourceName?: string;
   title: string;
   titleKo: string;
+  titleTranslated: string;
   excerpt: string;
   excerptKo: string;
+  excerptTranslated: string;
   language: string;
+  targetLanguage: DisplayLanguage;
   translated: boolean;
+  impact?: NewsImpact;
   fetchedAt: string;
   message?: string;
+}
+
+interface NewsTranslation {
+  id: string;
+  title: string;
+  snippet?: string;
+  translated: boolean;
+  sourceLanguage: 'ko' | 'en';
+  targetLanguage: DisplayLanguage;
+}
+
+interface NewsTranslationResult {
+  generatedAt: string;
+  targetLanguage: DisplayLanguage;
+  items: NewsTranslation[];
 }
 
 interface EarningsEvent {
@@ -126,7 +169,7 @@ interface RankingItem {
 
 interface RankingResult {
   generatedAt: string;
-  source: 'naver-mobile' | 'sample';
+  source: 'naver-mobile' | 'yahoo-finance' | 'sample';
   market: RankingMarket;
   type: RankingType;
   cacheTtlMs: number;
@@ -148,7 +191,9 @@ const providerLabels: Record<NewsProviderId, string> = {
 export function App() {
   const queryClient = useQueryClient();
   const initialQuery = getInitialQuery();
+  const initialLanguage = getInitialLanguage();
   const [input, setInput] = useState(initialQuery);
+  const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>(initialLanguage);
   const [activeQuery, setActiveQuery] = useState('');
   const [items, setItems] = useState<NewsItem[]>([]);
   const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
@@ -163,8 +208,9 @@ export function App() {
   const [error, setError] = useState<string>();
   const [notificationEnabled, setNotificationEnabled] = useState(false);
   const [selectedNewsId, setSelectedNewsId] = useState<string>();
+  const [breakingAlert, setBreakingAlert] = useState<NewsItem>();
   const [rankingType, setRankingType] = useState<RankingType>('turnover');
-  const [rankingMarket, setRankingMarket] = useState<RankingMarket>('KOSPI');
+  const [rankingMarket, setRankingMarket] = useState<RankingMarket>('US');
   const [selectedRankingSymbol, setSelectedRankingSymbol] = useState<string>();
   const eventSourceRef = useRef<EventSource | null>(null);
   const searchSeqRef = useRef(0);
@@ -182,9 +228,15 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!breakingAlert) return undefined;
+    const timer = window.setTimeout(() => setBreakingAlert(undefined), 25_000);
+    return () => window.clearTimeout(timer);
+  }, [breakingAlert]);
+
   const filteredItems = useMemo(() => {
     if (filter === 'all') return items;
-    if (filter === 'high') return items.filter((item) => item.severity === 'high');
+    if (filter === 'high') return items.filter((item) => impactScore(item) >= 60);
     if (filter === 'market') return items.filter(isMarketImpact);
     return items.filter((item) => item.provider === filter);
   }, [filter, items]);
@@ -196,7 +248,7 @@ export function App() {
 
   const counts = useMemo(() => ({
     all: items.length,
-    high: items.filter((item) => item.severity === 'high').length,
+    high: items.filter((item) => impactScore(item) >= 60).length,
     market: items.filter(isMarketImpact).length,
     direct: items.filter((item) => item.provider === 'direct-rss' || item.provider === 'source-search').length
   }), [items]);
@@ -209,11 +261,21 @@ export function App() {
   }, [nextCheckAt, nowMs]);
 
   const articleQuery = useQuery({
-    queryKey: ['article-detail', selectedNews?.url],
-    queryFn: ({ signal }) => fetchArticleDetail(selectedNews!, signal),
+    queryKey: ['article-detail', selectedNews?.id, selectedNews?.url, displayLanguage],
+    queryFn: ({ signal }) => fetchArticleDetail(selectedNews!, displayLanguage, signal),
     enabled: Boolean(selectedNews),
     staleTime: 30 * 60 * 1000
   });
+
+  const translationQuery = useQuery({
+    queryKey: ['news-translations', displayLanguage, items.map((item) => item.id).slice(0, 30).join(',')],
+    queryFn: ({ signal }) => fetchNewsTranslations(items.slice(0, 30), displayLanguage, signal),
+    enabled: displayLanguage !== 'original' && items.length > 0,
+    staleTime: 12 * 60 * 60 * 1000
+  });
+  const translations = useMemo(() => {
+    return new Map((translationQuery.data?.items ?? []).map((item) => [item.id, item]));
+  }, [translationQuery.data?.items]);
 
   const rankingQuery = useQuery({
     queryKey: ['market-ranking', rankingMarket, rankingType],
@@ -250,6 +312,7 @@ export function App() {
     setError(undefined);
     setItems([]);
     setSelectedNewsId(undefined);
+    setBreakingAlert(undefined);
     setNewItemsCount(0);
     setLastUpdatedAt(undefined);
     setLastCheckedAt(undefined);
@@ -305,13 +368,17 @@ export function App() {
       if (searchSeq !== searchSeqRef.current) return;
       const payload = JSON.parse((event as MessageEvent).data) as NewsSearchResult;
       if (payload.items.length > 0) {
+        const topIncoming = topImpactItem(payload.items);
         setItems((current) => {
           const mergedItems = mergeNews(payload.items, current);
           queryClient.setQueryData<NewsSearchResult>(['news-search', query], { ...payload, items: mergedItems });
-          setSelectedNewsId(payload.items[0]?.id);
+          setSelectedNewsId(topIncoming?.id ?? payload.items[0]?.id);
           return mergedItems;
         });
         setNewItemsCount((count) => count + payload.items.length);
+        if (topIncoming && impactScore(topIncoming) >= 60) {
+          setBreakingAlert(topIncoming);
+        }
         notifyNewItems(payload.items);
       }
       setStatuses(payload.statuses);
@@ -337,10 +404,11 @@ export function App() {
 
   const notifyNewItems = (freshItems: NewsItem[]) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    const urgent = freshItems.find((item) => item.severity === 'high') ?? freshItems[0];
+    const urgent = topImpactItem(freshItems) ?? freshItems[0];
     if (!urgent) return;
-    new Notification(urgent.sourceName, {
-      body: urgent.title,
+    const impact = impactScore(urgent);
+    new Notification(`${urgent.sourceName} · 영향도 ${impact}`, {
+      body: urgent.impact?.summary ?? urgent.title,
       tag: urgent.id
     });
   };
@@ -356,6 +424,11 @@ export function App() {
     void runSearch(input);
   };
 
+  const changeDisplayLanguage = (language: DisplayLanguage) => {
+    setDisplayLanguage(language);
+    localStorage.setItem('display-language', language);
+  };
+
   useEffect(() => {
     void runSearch(initialQuery);
     // Restore the monitor immediately after reload.
@@ -363,7 +436,7 @@ export function App() {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${breakingAlert ? `alert-${impactLevel(breakingAlert)}` : ''}`}>
       <header className="topbar">
         <div className="brand">
           <Radio size={20} aria-hidden />
@@ -382,11 +455,32 @@ export function App() {
           />
           <button type="submit">검색</button>
         </form>
+        <div className="language-select" aria-label="표시 언어">
+          <button className={displayLanguage === 'ko' ? 'active' : ''} type="button" onClick={() => changeDisplayLanguage('ko')}>
+            한국어
+          </button>
+          <button className={displayLanguage === 'en' ? 'active' : ''} type="button" onClick={() => changeDisplayLanguage('en')}>
+            English
+          </button>
+          <button className={displayLanguage === 'original' ? 'active' : ''} type="button" onClick={() => changeDisplayLanguage('original')}>
+            원문
+          </button>
+        </div>
         <div className={`connection ${connectionState}`}>
           {connectionState === 'live' ? <Wifi size={17} /> : <WifiOff size={17} />}
           <span>{connectionLabel(connectionState)}</span>
         </div>
       </header>
+
+      {breakingAlert && (
+        <BreakingAlert
+          item={breakingAlert}
+          translation={translations.get(breakingAlert.id)}
+          displayLanguage={displayLanguage}
+          onOpen={() => setSelectedNewsId(breakingAlert.id)}
+          onClose={() => setBreakingAlert(undefined)}
+        />
+      )}
 
       <main className="terminal-layout">
         <aside className="left-rail">
@@ -485,6 +579,8 @@ export function App() {
                 <NewsCard
                   key={item.id}
                   item={item}
+                  translation={translations.get(item.id)}
+                  displayLanguage={displayLanguage}
                   selected={selectedNews?.id === item.id}
                   onSelect={() => setSelectedNewsId(item.id)}
                 />
@@ -494,7 +590,12 @@ export function App() {
         </section>
 
         <aside className="detail-panel">
-          <ArticlePanel item={selectedNews} detail={articleQuery.data} isLoading={articleQuery.isLoading} />
+          <ArticlePanel
+            item={selectedNews}
+            detail={articleQuery.data}
+            isLoading={articleQuery.isLoading}
+            displayLanguage={displayLanguage}
+          />
           <div className="system-line">
             <span>자동 확인 {lastCheckedAt ? formatDateTime(lastCheckedAt) : '-'}</span>
             <span>{pollIntervalMs ? `${Math.round(pollIntervalMs / 1000)}초 주기` : '주기 계산 중'}</span>
@@ -538,6 +639,7 @@ function RankingPanel({
         </div>
       </div>
       <div className="segmented">
+        <button className={market === 'US' ? 'active' : ''} type="button" onClick={() => onMarketChange('US')}>US</button>
         <button className={market === 'KOSPI' ? 'active' : ''} type="button" onClick={() => onMarketChange('KOSPI')}>KOSPI</button>
         <button className={market === 'KOSDAQ' ? 'active' : ''} type="button" onClick={() => onMarketChange('KOSDAQ')}>KOSDAQ</button>
       </div>
@@ -572,9 +674,16 @@ function RankingPanel({
           <strong>{selected.name}</strong>
           <dl>
             <div><dt>거래대금</dt><dd>{selected.turnoverText ?? '-'}</dd></div>
-            <div><dt>외국인</dt><dd>{selected.foreignPureBuy ?? '-'}</dd></div>
-            <div><dt>기관</dt><dd>{selected.institutionPureBuy ?? '-'}</dd></div>
-            <div><dt>개인</dt><dd>{selected.individualPureBuy ?? '-'}</dd></div>
+            <div><dt>거래량</dt><dd>{selected.volume ?? '-'}</dd></div>
+            {market === 'US' ? (
+              <div><dt>시총</dt><dd>{selected.marketCap ?? '-'}</dd></div>
+            ) : (
+              <>
+                <div><dt>외국인</dt><dd>{selected.foreignPureBuy ?? '-'}</dd></div>
+                <div><dt>기관</dt><dd>{selected.institutionPureBuy ?? '-'}</dd></div>
+                <div><dt>개인</dt><dd>{selected.individualPureBuy ?? '-'}</dd></div>
+              </>
+            )}
           </dl>
         </div>
       )}
@@ -604,7 +713,54 @@ function EarningsMini({ result }: { result?: EarningsCalendarResult }) {
   );
 }
 
-function ArticlePanel({ item, detail, isLoading }: { item?: NewsItem; detail?: ArticleDetail; isLoading: boolean }) {
+function BreakingAlert({
+  item,
+  translation,
+  displayLanguage,
+  onOpen,
+  onClose
+}: {
+  item: NewsItem;
+  translation?: NewsTranslation;
+  displayLanguage: DisplayLanguage;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const impact = fallbackImpact(item);
+
+  return (
+    <section className={`breaking-alert ${impact.level}`} role="status" aria-live="assertive">
+      <div className="breaking-icon">
+        <AlertTriangle size={19} aria-hidden />
+      </div>
+      <div className="breaking-copy" onClick={onOpen}>
+        <div>
+          <span>{deliveryLabel(impact.deliveryMode)}</span>
+          <strong>영향도 {impact.score}</strong>
+          <em>{impact.label}</em>
+        </div>
+        <h2>{translatedTitle(item, translation, displayLanguage)}</h2>
+        <p>{impact.summary}</p>
+      </div>
+      <button className="breaking-open" type="button" onClick={onOpen}>상세</button>
+      <button className="breaking-close" type="button" aria-label="긴급 알림 닫기" onClick={onClose}>
+        <X size={17} aria-hidden />
+      </button>
+    </section>
+  );
+}
+
+function ArticlePanel({
+  item,
+  detail,
+  isLoading,
+  displayLanguage
+}: {
+  item?: NewsItem;
+  detail?: ArticleDetail;
+  isLoading: boolean;
+  displayLanguage: DisplayLanguage;
+}) {
   if (!item) {
     return (
       <section className="article-panel empty">
@@ -613,6 +769,7 @@ function ArticlePanel({ item, detail, isLoading }: { item?: NewsItem; detail?: A
       </section>
     );
   }
+  const impact = detail?.impact ?? item.impact;
 
   return (
     <section className="article-panel">
@@ -621,13 +778,14 @@ function ArticlePanel({ item, detail, isLoading }: { item?: NewsItem; detail?: A
         <strong>{item.sourceName}</strong>
         <time>{formatDateTime(item.publishedAt)}</time>
       </div>
-      <h2>{detail?.titleKo ?? item.title}</h2>
-      {detail?.translated && <p className="original-title">{detail.title}</p>}
+      <h2>{articleTitle(item, detail, displayLanguage)}</h2>
+      {displayLanguage !== 'original' && detail?.translated && <p className="original-title">{detail.title}</p>}
+      <ImpactBreakdown impact={impact} />
       <div className="article-body">
         {isLoading ? (
           <span>본문과 번역을 가져오는 중</span>
         ) : (
-          <p>{detail?.excerptKo ?? item.snippet ?? '본문 미리보기를 가져올 수 없습니다.'}</p>
+          <p>{articleExcerpt(item, detail, displayLanguage)}</p>
         )}
       </div>
       {detail?.message && <div className="detail-note">{detail.message}</div>}
@@ -642,6 +800,33 @@ function ArticlePanel({ item, detail, isLoading }: { item?: NewsItem; detail?: A
         원문 열기
       </a>
     </section>
+  );
+}
+
+function ImpactBreakdown({ impact }: { impact?: NewsImpact }) {
+  const resolved = resolveImpact(impact);
+
+  return (
+    <div className={`impact-panel ${resolved.level}`}>
+      <div className="impact-summary">
+        <span className={`impact-score ${resolved.level}`}>{resolved.score}</span>
+        <div>
+          <strong>{resolved.summary}</strong>
+          <span>{deliveryLabel(resolved.deliveryMode)} · 신뢰도 {resolved.confidence}%</span>
+        </div>
+      </div>
+      {resolved.factors.length > 0 && (
+        <div className="impact-factors">
+          {resolved.factors.slice(0, 4).map((factor) => (
+            <div className="impact-factor" key={factor.id}>
+              <span>+{factor.score}</span>
+              <strong>{factor.label}</strong>
+              <em>{factor.reason}</em>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -662,12 +847,29 @@ function FilterButton({ active, onClick, children }: { active: boolean; onClick:
   );
 }
 
-function NewsCard({ item, selected, onSelect }: { item: NewsItem; selected: boolean; onSelect: () => void }) {
+function NewsCard({
+  item,
+  translation,
+  displayLanguage,
+  selected,
+  onSelect
+}: {
+  item: NewsItem;
+  translation?: NewsTranslation;
+  displayLanguage: DisplayLanguage;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const title = translatedTitle(item, translation, displayLanguage);
+  const snippet = translatedSnippet(item, translation, displayLanguage);
+  const impact = fallbackImpact(item);
+
   return (
-    <article className={`news-card ${item.severity} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <article className={`news-card ${item.severity} impact-${impact.level} ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="news-topline">
         <time>{formatDateTime(item.publishedAt)}</time>
         <span className="provider-chip">{providerLabels[item.provider]}</span>
+        <span className={`impact-score small ${impact.level}`}>{impact.score}</span>
         {isMarketImpact(item) && <span className="impact-chip">시장영향</span>}
         {item.country && (
           <span className="country">
@@ -676,10 +878,12 @@ function NewsCard({ item, selected, onSelect }: { item: NewsItem; selected: bool
           </span>
         )}
       </div>
-      <h3>{item.title}</h3>
-      {item.snippet && <p>{item.snippet}</p>}
+      <h3>{title}</h3>
+      {displayLanguage !== 'original' && translation?.translated && <p className="original-title compact">{item.title}</p>}
+      {snippet && <p>{snippet}</p>}
       <div className="news-footer">
         <span className={`severity ${item.severity}`}>{severityLabel(item.severity)}</span>
+        <span className={`delivery-chip ${impact.level}`}>{deliveryLabel(impact.deliveryMode)}</span>
         <strong>{item.sourceName}</strong>
       </div>
     </article>
@@ -692,17 +896,49 @@ async function fetchNewsSearch(query: string, signal?: AbortSignal): Promise<New
   return response.json() as Promise<NewsSearchResult>;
 }
 
-async function fetchArticleDetail(item: NewsItem, signal?: AbortSignal): Promise<ArticleDetail> {
+async function fetchArticleDetail(
+  item: NewsItem,
+  targetLanguage: DisplayLanguage,
+  signal?: AbortSignal
+): Promise<ArticleDetail> {
   const params = new URLSearchParams({
     url: item.url,
+    query: item.query,
     title: item.title,
     snippet: item.snippet ?? '',
     sourceName: item.sourceName,
-    language: item.language ?? ''
+    provider: item.provider,
+    publishedAt: item.publishedAt,
+    severity: item.severity,
+    language: item.language ?? '',
+    targetLanguage
   });
   const response = await fetch(`/api/news/detail?${params.toString()}`, { signal });
   if (!response.ok) throw new Error(`기사 상세 실패: HTTP ${response.status}`);
   return response.json() as Promise<ArticleDetail>;
+}
+
+async function fetchNewsTranslations(
+  items: NewsItem[],
+  targetLanguage: DisplayLanguage,
+  signal?: AbortSignal
+): Promise<NewsTranslationResult> {
+  const response = await fetch('/api/news/translations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      targetLanguage,
+      items: items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        snippet: item.snippet,
+        language: item.language
+      }))
+    })
+  });
+  if (!response.ok) throw new Error(`뉴스 번역 실패: HTTP ${response.status}`);
+  return response.json() as Promise<NewsTranslationResult>;
 }
 
 async function fetchMarketRanking(
@@ -749,6 +985,39 @@ function mergeNews(primary: NewsItem[], secondary: NewsItem[]): NewsItem[] {
   );
 }
 
+function topImpactItem(items: NewsItem[]): NewsItem | undefined {
+  return [...items].sort((a, b) => impactScore(b) - impactScore(a))[0];
+}
+
+function impactScore(item?: NewsItem): number {
+  return fallbackImpact(item).score;
+}
+
+function impactLevel(item?: NewsItem): NewsImpactLevel {
+  return fallbackImpact(item).level;
+}
+
+function fallbackImpact(item?: Pick<NewsItem, 'impact' | 'severity'>): NewsImpact {
+  if (item?.impact) return item.impact;
+  const score = item?.severity === 'high' ? 65 : item?.severity === 'medium' ? 42 : 18;
+  return resolveImpact(undefined, score);
+}
+
+function resolveImpact(impact?: NewsImpact, fallbackScore = 18): NewsImpact {
+  if (impact) return impact;
+  const level: NewsImpactLevel = fallbackScore >= 80 ? 'critical' : fallbackScore >= 60 ? 'high' : fallbackScore >= 40 ? 'medium' : 'low';
+  return {
+    score: fallbackScore,
+    level,
+    label: level === 'critical' ? '긴급' : level === 'high' ? '강함' : level === 'medium' ? '주의' : '일반',
+    deliveryMode: level === 'critical' ? 'breaking' : level === 'high' ? 'priority' : level === 'medium' ? 'watch' : 'normal',
+    confidence: 45,
+    summary: level === 'high' || level === 'critical' ? '중요 키워드 기반 긴급 확인 대상입니다.' : '일반 모니터링 항목입니다.',
+    affectedChannels: [],
+    factors: []
+  };
+}
+
 function buildSignal(items: NewsItem[], newItemsCount: number): {
   level: RiskLevel;
   label: string;
@@ -757,12 +1026,13 @@ function buildSignal(items: NewsItem[], newItemsCount: number): {
   const now = Date.now();
   const recentItems = items.filter((item) => now - new Date(item.publishedAt).getTime() <= 2 * 60 * 60 * 1000);
   const recentHigh = recentItems.filter((item) => item.severity === 'high').length;
+  const topImpact = Math.max(0, ...recentItems.map(impactScore));
   const marketHits = recentItems.filter(isMarketImpact).length;
   const directHits = recentItems.filter((item) => item.provider === 'source-search' || item.provider === 'direct-rss').length;
-  const score = recentHigh * 2 + marketHits * 2 + directHits + Math.min(newItemsCount, 5);
+  const score = Math.round(topImpact / 10) + recentHigh * 2 + marketHits * 2 + directHits + Math.min(newItemsCount, 5);
 
-  if (score >= 10) return { level: 'risk-off', label: 'RISK-OFF', reason: '긴급 원문과 시장영향 뉴스가 동시에 증가했습니다.' };
-  if (score >= 4) return { level: 'watch', label: 'WATCH', reason: '단타 대응이 필요한 뉴스 밀도가 있습니다.' };
+  if (topImpact >= 80 || score >= 12) return { level: 'risk-off', label: 'RISK-OFF', reason: `최고 영향도 ${topImpact}. 긴급 원문과 시장영향 뉴스가 동시에 증가했습니다.` };
+  if (topImpact >= 60 || score >= 5) return { level: 'watch', label: 'WATCH', reason: `최고 영향도 ${topImpact}. 단타 대응이 필요한 뉴스 밀도가 있습니다.` };
   return { level: 'calm', label: 'CALM', reason: '최근 2시간 기준 급한 신호가 적습니다.' };
 }
 
@@ -795,6 +1065,13 @@ function connectionLabel(state: ConnectionState): string {
 function severityLabel(severity: NewsSeverity): string {
   if (severity === 'high') return '긴급';
   if (severity === 'medium') return '주의';
+  return '일반';
+}
+
+function deliveryLabel(mode: NewsDeliveryMode): string {
+  if (mode === 'breaking') return '즉시 확인';
+  if (mode === 'priority') return '우선 확인';
+  if (mode === 'watch') return '관찰';
   return '일반';
 }
 
@@ -833,6 +1110,33 @@ function isNegative(value?: string): boolean {
   return Boolean(value?.trim().startsWith('-'));
 }
 
+function translatedTitle(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string {
+  return displayLanguage === 'original' ? item.title : translation?.title ?? item.title;
+}
+
+function translatedSnippet(item: NewsItem, translation: NewsTranslation | undefined, displayLanguage: DisplayLanguage): string | undefined {
+  return displayLanguage === 'original' ? item.snippet : translation?.snippet ?? item.snippet;
+}
+
+function articleTitle(item: NewsItem, detail: ArticleDetail | undefined, displayLanguage: DisplayLanguage): string {
+  if (!detail) return item.title;
+  if (displayLanguage === 'original') return detail.title;
+  if (displayLanguage === 'ko') return detail.titleKo || detail.titleTranslated || detail.title;
+  return detail.titleTranslated || detail.title;
+}
+
+function articleExcerpt(item: NewsItem, detail: ArticleDetail | undefined, displayLanguage: DisplayLanguage): string {
+  if (!detail) return item.snippet ?? '본문 미리보기를 가져올 수 없습니다.';
+  if (displayLanguage === 'original') return detail.excerpt || item.snippet || '본문 미리보기를 가져올 수 없습니다.';
+  if (displayLanguage === 'ko') return detail.excerptKo || detail.excerptTranslated || detail.excerpt;
+  return detail.excerptTranslated || detail.excerpt || item.snippet || '본문 미리보기를 가져올 수 없습니다.';
+}
+
 function getInitialQuery(): string {
   return localStorage.getItem('last-news-query') || 'SOXL';
+}
+
+function getInitialLanguage(): DisplayLanguage {
+  const saved = localStorage.getItem('display-language');
+  return saved === 'en' || saved === 'original' || saved === 'ko' ? saved : 'ko';
 }

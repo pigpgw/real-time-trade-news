@@ -1,3 +1,5 @@
+import type { NewsImpact } from './impact';
+
 export type NewsProviderId = 'direct-rss' | 'source-search' | 'gdelt' | 'google-news' | 'naver' | 'newsapi' | 'sec';
 export type NewsSeverity = 'low' | 'medium' | 'high';
 
@@ -14,6 +16,7 @@ export interface NewsItem {
   country?: string;
   severity: NewsSeverity;
   matchedKeywords: string[];
+  impact?: NewsImpact;
 }
 
 export interface ProviderStatus {

@@ -1,29 +1,41 @@
 import crypto from 'node:crypto';
 import type { ArticleDetail } from '../domain/article';
+import { scoreNewsImpact } from '../domain/impactScoring';
+import type { NewsProviderId, NewsSeverity } from '../domain/news';
 import { decodeHtml, stripHtml } from '../domain/newsUtils';
-import { fetchJson, fetchText } from '../providers/http';
+import { fetchText } from '../providers/http';
+import { detectLanguage, type DisplayLanguage, translateText } from './translationService';
 
 interface ArticleRequest {
   url: string;
+  query?: string;
   title?: string;
   snippet?: string;
   sourceName?: string;
+  provider?: NewsProviderId;
+  publishedAt?: string;
+  severity?: NewsSeverity;
   language?: string;
-}
-
-interface TranslationResponse {
-  responseData?: {
-    translatedText?: string;
-  };
+  targetLanguage?: DisplayLanguage;
 }
 
 const DETAIL_TTL_MS = 30 * 60 * 1000;
-const TRANSLATION_TTL_MS = 12 * 60 * 60 * 1000;
 const detailCache = new Map<string, { expiresAt: number; detail: ArticleDetail }>();
-const translationCache = new Map<string, { expiresAt: number; text: string }>();
 
 export async function getArticleDetail(request: ArticleRequest): Promise<ArticleDetail> {
-  const cacheKey = hash(`${request.url}:${request.title ?? ''}:${request.snippet ?? ''}`);
+  const targetLanguage = request.targetLanguage ?? 'ko';
+  const cacheKey = hash(
+    [
+      request.url,
+      request.query ?? '',
+      request.title ?? '',
+      request.snippet ?? '',
+      request.provider ?? '',
+      request.publishedAt ?? '',
+      request.severity ?? '',
+      targetLanguage
+    ].join(':')
+  );
   const cached = detailCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.detail;
 
@@ -44,20 +56,39 @@ export async function getArticleDetail(request: ArticleRequest): Promise<Article
   const title = page.title || fallbackTitle || request.sourceName || '제목 없음';
   const excerpt = normalizeExcerpt(page.excerpt || fallbackSnippet || title);
   const language = detectLanguage(`${title} ${excerpt}`, request.language);
-  const shouldTranslate = language !== 'ko';
-  const [titleKo, excerptKo] = shouldTranslate
-    ? await Promise.all([translateToKorean(title), translateToKorean(excerpt)])
-    : [title, excerpt];
+  const [titleKo, excerptKo, titleTranslated, excerptTranslated] = await Promise.all([
+    translateText(title, 'ko', language),
+    translateText(excerpt, 'ko', language),
+    translateText(title, targetLanguage, language),
+    translateText(excerpt, targetLanguage, language)
+  ]);
+  const impact = scoreNewsImpact({
+    query: request.query ?? fallbackTitle ?? title,
+    item: {
+      provider: request.provider ?? 'source-search',
+      title,
+      publishedAt: request.publishedAt ?? new Date().toISOString(),
+      snippet: fallbackSnippet || excerpt,
+      severity: request.severity ?? 'low',
+      matchedKeywords: [],
+      sourceName: request.sourceName ?? ''
+    },
+    body: excerpt
+  });
 
   const detail: ArticleDetail = {
     url: request.url,
     sourceName: request.sourceName,
     title,
     titleKo,
+    titleTranslated,
     excerpt,
     excerptKo,
+    excerptTranslated,
     language,
-    translated: shouldTranslate,
+    targetLanguage,
+    translated: targetLanguage !== 'original' && (titleTranslated !== title || excerptTranslated !== excerpt),
+    impact,
     fetchedAt: new Date().toISOString(),
     message: page.message
   };
@@ -156,42 +187,11 @@ function normalizeExcerpt(value: string): string {
   return cleaned.length > 1_400 ? `${cleaned.slice(0, 1_400).trim()}...` : cleaned;
 }
 
-function detectLanguage(text: string, provided?: string): string {
-  if (/[가-힣]/.test(text)) return 'ko';
-  if (provided?.toLowerCase().startsWith('ko')) return 'ko';
-  return 'en';
-}
-
 function isGoogleNewsUrl(url: string): boolean {
   try {
     return new URL(url).hostname.includes('news.google.');
   } catch {
     return false;
-  }
-}
-
-async function translateToKorean(text: string): Promise<string> {
-  if (!text || /[가-힣]/.test(text)) return text;
-  const normalized = text.slice(0, 900);
-  const key = hash(normalized);
-  const cached = translationCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.text;
-
-  try {
-    const params = new URLSearchParams({
-      q: normalized,
-      langpair: 'en|ko'
-    });
-    const response = await fetchJson<TranslationResponse>(
-      `https://api.mymemory.translated.net/get?${params.toString()}`,
-      {},
-      8_000
-    );
-    const translated = stripHtml(response.responseData?.translatedText ?? normalized);
-    translationCache.set(key, { expiresAt: Date.now() + TRANSLATION_TTL_MS, text: translated });
-    return translated || normalized;
-  } catch {
-    return normalized;
   }
 }
 

@@ -28,6 +28,26 @@ interface NaverIntegrationResponse {
   }>;
 }
 
+interface YahooScreenerResponse {
+  finance?: {
+    result?: Array<{
+      quotes?: YahooQuote[];
+    }>;
+  };
+}
+
+interface YahooQuote {
+  symbol?: string;
+  shortName?: string;
+  longName?: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  marketCap?: number;
+  regularMarketTime?: number;
+}
+
 const CACHE_TTL_MS = 60 * 1000;
 const cache = new Map<string, { expiresAt: number; result: RankingResult }>();
 
@@ -36,9 +56,51 @@ export async function getMarketRanking(market: RankingMarket, type: RankingType)
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.result;
 
-  const result = await fetchNaverRanking(market, type).catch(() => sampleRanking(market, type));
+  const result = market === 'US'
+    ? await fetchYahooRanking(type).catch(() => sampleRanking(market, type))
+    : await fetchNaverRanking(market, type).catch(() => sampleRanking(market, type));
   cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result });
   return result;
+}
+
+async function fetchYahooRanking(type: RankingType): Promise<RankingResult> {
+  const screenerId = yahooScreenerId(type);
+  const payload = await fetchJson<YahooScreenerResponse>(
+    `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?${new URLSearchParams({
+      scrIds: screenerId,
+      count: '30'
+    }).toString()}`,
+    {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 stock-news-monitor/0.1'
+      }
+    },
+    10_000
+  );
+
+  const quotes = payload.finance?.result?.[0]?.quotes ?? [];
+  const items = quotes
+    .map((quote) => fromYahooQuote(quote, type))
+    .filter((item) => item.symbol && item.name)
+    .sort((a, b) => {
+      if (type === 'turnover' || type === 'foreign' || type === 'institution') {
+        return parseUsdTurnover(b.turnover) - parseUsdTurnover(a.turnover);
+      }
+      return Math.abs(Number.parseFloat(b.changeRate ?? '0')) - Math.abs(Number.parseFloat(a.changeRate ?? '0'));
+    });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    source: 'yahoo-finance',
+    market: 'US',
+    type,
+    cacheTtlMs: CACHE_TTL_MS,
+    providerMessage: type === 'foreign' || type === 'institution'
+      ? 'Yahoo Finance 공개 screener 기준. 미국 무료 공개 데이터에서는 외국인/기관 순매수 수급을 직접 제공하지 않아 거래대금 상위로 대체'
+      : 'Yahoo Finance 공개 screener 기준, 60초 캐시',
+    items: items.slice(0, 12)
+  };
 }
 
 async function fetchNaverRanking(market: RankingMarket, type: RankingType): Promise<RankingResult> {
@@ -78,6 +140,33 @@ function naverSortType(type: RankingType): string {
   if (type === 'gainers') return 'up';
   if (type === 'losers') return 'down';
   return 'priceTop';
+}
+
+function yahooScreenerId(type: RankingType): string {
+  if (type === 'gainers') return 'day_gainers';
+  if (type === 'losers') return 'day_losers';
+  return 'most_actives';
+}
+
+function fromYahooQuote(quote: YahooQuote, type: RankingType): RankingItem {
+  const price = quote.regularMarketPrice ?? 0;
+  const volume = quote.regularMarketVolume ?? 0;
+  const turnover = price * volume;
+  return {
+    symbol: quote.symbol ?? '',
+    name: quote.shortName ?? quote.longName ?? quote.symbol ?? '',
+    price: price ? price.toLocaleString('en-US', { maximumFractionDigits: 2 }) : undefined,
+    change: quote.regularMarketChange?.toFixed(2),
+    changeRate: quote.regularMarketChangePercent?.toFixed(2),
+    volume: volume ? volume.toLocaleString('en-US') : undefined,
+    turnover: String(Math.round(turnover)),
+    turnoverText: turnover ? formatUsdAmount(turnover) : undefined,
+    marketCap: quote.marketCap ? formatUsdAmount(quote.marketCap) : undefined,
+    tradedAt: quote.regularMarketTime ? new Date(quote.regularMarketTime * 1000).toISOString() : undefined,
+    reason: type === 'turnover' || type === 'foreign' || type === 'institution'
+      ? formatUsdAmount(turnover)
+      : `${quote.regularMarketChangePercent?.toFixed(2) ?? '-'}%`
+  };
 }
 
 async function attachFlowAndSort(items: RankingItem[], type: RankingType): Promise<RankingItem[]> {
@@ -146,7 +235,53 @@ function parseFlowValue(value?: string): number {
   return Number(value.replace(/[,+]/g, '')) || Number.NEGATIVE_INFINITY;
 }
 
+function parseUsdTurnover(value?: string): number {
+  if (!value) return 0;
+  return Number(value) || 0;
+}
+
+function formatUsdAmount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '-';
+  if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  return `$${Math.round(value).toLocaleString('en-US')}`;
+}
+
 function sampleRanking(market: RankingMarket, type: RankingType): RankingResult {
+  if (market === 'US') {
+    return {
+      generatedAt: new Date().toISOString(),
+      source: 'sample',
+      market,
+      type,
+      cacheTtlMs: CACHE_TTL_MS,
+      providerMessage: '미국 순위 공급자 응답 실패. 샘플 표시 중',
+      items: [
+        {
+          symbol: 'NVDA',
+          name: 'NVIDIA Corporation',
+          price: '0',
+          changeRate: '+0.00',
+          volume: '-',
+          turnover: '0',
+          turnoverText: '-',
+          reason: '샘플'
+        },
+        {
+          symbol: 'TSLA',
+          name: 'Tesla, Inc.',
+          price: '0',
+          changeRate: '+0.00',
+          volume: '-',
+          turnover: '0',
+          turnoverText: '-',
+          reason: '샘플'
+        }
+      ]
+    };
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     source: 'sample',

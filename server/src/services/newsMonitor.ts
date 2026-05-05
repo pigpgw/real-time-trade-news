@@ -1,5 +1,6 @@
 import { config } from '../config';
 import type { NewsItem, NewsProvider, NewsProviderId, NewsSearchResult, ProviderStatus } from '../domain/news';
+import { scoreNewsImpact } from '../domain/impactScoring';
 import { compactQuery, dedupeNews } from '../domain/newsUtils';
 import { newsProviders } from '../providers';
 
@@ -62,10 +63,20 @@ export class NewsMonitor {
 
     this.refreshDisabledStatuses();
 
+    const dedupedItems = dedupeNews(allItems).slice(0, 150);
+    const items = dedupedItems.map((item) => ({
+      ...item,
+      impact: scoreNewsImpact({
+        query: normalizedQuery,
+        item,
+        peers: dedupedItems
+      })
+    }));
+
     const result = {
       query: normalizedQuery,
       generatedAt: new Date().toISOString(),
-      items: dedupeNews(allItems).slice(0, 150),
+      items,
       statuses: this.withDisabledStatuses(localStatuses)
     };
     this.cache.set(cacheKey, { expiresAt: Date.now() + 2_000, result });

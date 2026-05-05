@@ -1,6 +1,25 @@
 import crypto from 'node:crypto';
 import type { NewsItem, NewsSeverity } from './news';
 
+const knownTickerTerms = new Set([
+  'aapl',
+  'amd',
+  'amzn',
+  'avgo',
+  'goog',
+  'googl',
+  'meta',
+  'msft',
+  'mu',
+  'nvda',
+  'qqq',
+  'soxl',
+  'sqqq',
+  'tqqq',
+  'tsla',
+  'tsm'
+]);
+
 const highImpactTerms = [
   'war',
   'warship',
@@ -170,7 +189,12 @@ export function parseGdeltDate(value?: string): string {
 }
 
 export function compactQuery(query: string): string {
-  return query.trim().replace(/\s+/g, ' ');
+  return query
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .map((token) => (knownTickerTerms.has(token.toLowerCase()) ? token.toUpperCase() : token))
+    .join(' ');
 }
 
 export function quotedQuery(query: string): string {

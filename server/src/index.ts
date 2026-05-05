@@ -6,6 +6,7 @@ import { getArticleDetail } from './services/articleDetail';
 import { getEarningsCalendar } from './services/earningsCalendar';
 import { getMarketRanking } from './services/rankingService';
 import { newsMonitor } from './services/newsMonitor';
+import { translateNewsItems } from './services/translationService';
 
 const app = Fastify({
   logger: true
@@ -28,14 +29,29 @@ const earningsQuerySchema = z.object({
 
 const articleDetailQuerySchema = z.object({
   url: z.string().url(),
+  query: z.string().optional(),
   title: z.string().optional(),
   snippet: z.string().optional(),
   sourceName: z.string().optional(),
-  language: z.string().optional()
+  provider: z.enum(['direct-rss', 'source-search', 'gdelt', 'google-news', 'naver', 'newsapi', 'sec']).optional(),
+  publishedAt: z.string().optional(),
+  severity: z.enum(['low', 'medium', 'high']).optional(),
+  language: z.string().optional(),
+  targetLanguage: z.enum(['ko', 'en', 'original']).default('ko')
+});
+
+const translationBodySchema = z.object({
+  targetLanguage: z.enum(['ko', 'en', 'original']).default('ko'),
+  items: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string(),
+    snippet: z.string().optional(),
+    language: z.string().optional()
+  })).max(30)
 });
 
 const rankingQuerySchema = z.object({
-  market: z.enum(['KOSPI', 'KOSDAQ']).default('KOSPI'),
+  market: z.enum(['KOSPI', 'KOSDAQ', 'US']).default('KOSPI'),
   type: z.enum(['turnover', 'gainers', 'losers', 'foreign', 'institution']).default('turnover')
 });
 
@@ -64,6 +80,19 @@ app.get('/api/news/detail', async (request, reply) => {
   }
 
   return getArticleDetail(parsed.data);
+});
+
+app.post('/api/news/translations', async (request, reply) => {
+  const parsed = translationBodySchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.status(400).send({ error: 'invalid translation request' });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    targetLanguage: parsed.data.targetLanguage,
+    items: await translateNewsItems(parsed.data.items, parsed.data.targetLanguage)
+  };
 });
 
 app.get('/api/earnings/calendar', async (request, reply) => {
