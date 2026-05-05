@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { NewsFetchOptions, NewsItem, NewsProvider } from '../domain/news';
+import { matchesExpandedQuery, newsSearchTerms } from '../domain/queryExpansion';
 import { createNewsId, decodeHtml, isRecent, scoreNews, stripHtml } from '../domain/newsUtils';
 import { fetchText } from './http';
 
@@ -22,15 +23,34 @@ export const googleNewsProvider: NewsProvider = {
   label: 'Google News RSS',
   enabled: () => true,
   async fetch(query: string, options: NewsFetchOptions): Promise<NewsItem[]> {
-    const [kr, us] = await Promise.all([
-      fetchRegion(query, options, 'ko', 'KR', 'KR:ko'),
-      fetchRegion(query, options, 'en-US', 'US', 'US:en')
+    const terms = newsSearchTerms(query).filter((term) => /[a-z0-9가-힣]/i.test(term)).slice(0, 2);
+    if (terms.length === 0) return [];
+    const searches = terms.flatMap((term) => [
+      fetchRegion(term, query, options, 'ko', 'KR', 'KR:ko'),
+      fetchRegion(term, query, options, 'en-US', 'US', 'US:en')
     ]);
-    return [...kr, ...us];
+    const settled = await Promise.allSettled(searches);
+    const items: NewsItem[] = [];
+    const errors: string[] = [];
+
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        items.push(...result.value);
+      } else {
+        errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      }
+    }
+
+    if (items.length === 0 && errors.length === settled.length) {
+      throw new Error(errors[0] ?? 'Google News RSS failed');
+    }
+
+    return items.filter((item) => matchesExpandedQuery(query, item.title, item.snippet, item.sourceName));
   }
 };
 
 async function fetchRegion(
+  searchTerm: string,
   query: string,
   options: NewsFetchOptions,
   hl: string,
@@ -38,7 +58,7 @@ async function fetchRegion(
   ceid: string
 ): Promise<NewsItem[]> {
   const params = new URLSearchParams({
-    q: `${query} when:${options.lookbackHours}h`,
+    q: `${searchTerm} when:${options.lookbackHours}h`,
     hl,
     gl,
     ceid

@@ -114,6 +114,20 @@ const directSources: RssSource[] = [
     url: 'https://finance.yahoo.com/news/rssindex',
     language: 'en',
     country: 'US'
+  },
+  {
+    id: 'investing-stock-market',
+    label: 'Investing.com Stock Market News',
+    url: 'https://www.investing.com/rss/news_25.rss',
+    language: 'en',
+    country: 'US'
+  },
+  {
+    id: 'seeking-alpha-market-news',
+    label: 'Seeking Alpha Market News',
+    url: 'https://seekingalpha.com/market_currents.xml',
+    language: 'en',
+    country: 'US'
   }
 ];
 

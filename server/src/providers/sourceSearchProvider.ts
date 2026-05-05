@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { NewsFetchOptions, NewsItem, NewsProvider } from '../domain/news';
-import { expandQuery, expandQueryGroups, matchesExpandedQuery } from '../domain/queryExpansion';
+import { expandQuery, expandQueryGroups, matchesExpandedQuery, newsSearchTerms } from '../domain/queryExpansion';
 import { createNewsId, decodeHtml, isRecent, scoreNews, stripHtml } from '../domain/newsUtils';
 import { fetchText } from './http';
 
@@ -57,7 +57,7 @@ export const sourceSearchProvider: NewsProvider = {
   label: 'Overseas Source Search',
   enabled: () => true,
   async fetch(query: string, options: NewsFetchOptions): Promise<NewsItem[]> {
-    const searchTerms = buildSearchTerms(query).slice(0, 2);
+    const searchTerms = buildSearchTerms(query).slice(0, 3);
     const targets = selectSourceTargets(query);
     const searches = targets.flatMap((source) =>
       searchTerms.map((term) => fetchSourceSearch(source, term, query, options))
@@ -79,7 +79,7 @@ function selectSourceTargets(query: string): SourceTarget[] {
   const topics = detectTopics(query);
   return [...sourceTargets]
     .sort((a, b) => sourceScore(b, topics) - sourceScore(a, topics))
-    .slice(0, 10);
+    .slice(0, 5);
 }
 
 function sourceScore(source: SourceTarget, topics: SourceTopic[]): number {
@@ -148,11 +148,16 @@ async function fetchSourceSearch(
 
 function buildSearchTerms(query: string): string[] {
   const groups = expandQueryGroups(query);
-  const flat = expandQuery(query).filter((term) => /[a-z0-9]/i.test(term));
+  const exact = query.trim().toLowerCase();
+  const flat = prioritizeSourceSearchTerms(
+    newsSearchTerms(query).filter((term) => /[a-z0-9]/i.test(term)),
+    exact
+  );
+  const expanded = expandQuery(query).filter((term) => /[a-z0-9]/i.test(term));
   const terms = new Set<string>();
 
   for (const term of flat) {
-    if (term.includes(' ') && term.length <= 48) terms.add(`"${term}"`);
+    if (term.length <= 48) terms.add(term);
   }
 
   if (groups.length > 1) {
@@ -166,11 +171,23 @@ function buildSearchTerms(query: string): string[] {
     }
   }
 
-  for (const term of flat) {
+  for (const term of expanded) {
+    if (term.includes(' ') && term.length <= 48) terms.add(`"${term}"`);
+  }
+
+  for (const term of expanded) {
     if (!term.includes(' ') && term.length > 2) terms.add(term);
   }
 
   return Array.from(terms).slice(0, 6);
+}
+
+function prioritizeSourceSearchTerms(terms: string[], exact: string): string[] {
+  if (!/^(soxl|tqqq|sqqq)$/.test(exact)) return terms;
+  return [
+    ...terms.filter((term) => term.toLowerCase() !== exact),
+    ...terms.filter((term) => term.toLowerCase() === exact)
+  ];
 }
 
 function quoteIfNeeded(value: string): string {

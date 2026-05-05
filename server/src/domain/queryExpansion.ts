@@ -1,9 +1,9 @@
 const staticExpansions: Record<string, string[]> = {
   AAPL: ['Apple', 'Apple Inc', 'iPhone'],
   TSLA: ['Tesla', 'Elon Musk'],
-  SOXL: ['semiconductor ETF', 'semiconductor stocks', 'chip stocks', 'Direxion Daily Semiconductor Bull 3X'],
-  TQQQ: ['Nasdaq 100', 'QQQ', 'Nasdaq futures', 'technology stocks'],
-  NVDA: ['Nvidia', 'NVIDIA', 'AI chips'],
+  SOXL: ['semiconductor', 'chip stocks', 'semiconductor stocks', 'Nvidia', 'AMD', 'Broadcom', 'TSMC', 'Micron', 'ASML', 'SOXX', 'SMH', 'Direxion Daily Semiconductor Bull 3X', 'Nasdaq futures', 'stock futures', 'risk-off', 'Middle East', 'Iran', 'Israel', 'missile', 'Hormuz', 'oil prices', 'Taiwan', 'export controls'],
+  TQQQ: ['Nasdaq', 'Nasdaq 100', 'QQQ', 'Nasdaq futures', 'stock futures', 'risk-off', 'technology stocks', 'Apple', 'Microsoft', 'Nvidia', 'Amazon', 'Meta', 'Tesla', 'Middle East', 'Iran', 'Israel', 'missile'],
+  NVDA: ['Nvidia', 'NVIDIA', 'AI chips', 'semiconductor'],
   MSFT: ['Microsoft'],
   AMD: ['Advanced Micro Devices', 'AMD'],
   GOOGL: ['Alphabet', 'Google'],
@@ -35,8 +35,70 @@ const staticExpansions: Record<string, string[]> = {
   환율: ['currency', 'foreign exchange', 'FX', 'dollar', 'won']
 };
 
+const prioritizedNewsTerms: Record<string, string[]> = {
+  SOXL: [
+    'SOXL',
+    'semiconductor stocks',
+    'Nasdaq futures',
+    'stock futures',
+    'semiconductor',
+    'Nvidia',
+    'AMD',
+    'Broadcom',
+    'Micron',
+    'TSMC',
+    'ASML',
+    'chip stocks',
+    'SOXX',
+    'SMH',
+    'risk-off',
+    'Middle East',
+    'Iran',
+    'Israel',
+    'missile',
+    'Hormuz',
+    'oil prices',
+    'Taiwan',
+    'export controls',
+    'Direxion Daily Semiconductor Bull 3X'
+  ],
+  TQQQ: [
+    'TQQQ',
+    'Nasdaq 100',
+    'Nasdaq futures',
+    'stock futures',
+    'risk-off',
+    'QQQ',
+    'technology stocks',
+    'Nvidia',
+    'Apple',
+    'Microsoft',
+    'Amazon',
+    'Meta',
+    'Tesla',
+    'Middle East',
+    'Iran',
+    'Israel',
+    'missile'
+  ],
+  SQQQ: ['SQQQ', 'Nasdaq 100', 'Nasdaq futures', 'QQQ', 'technology stocks'],
+  NVDA: ['NVDA', 'Nvidia', 'AI chips', 'semiconductor'],
+  AMD: ['AMD', 'Advanced Micro Devices', 'semiconductor'],
+  TSM: ['TSM', 'TSMC', 'Taiwan Semiconductor', 'semiconductor']
+};
+
 export function expandQuery(query: string): string[] {
   return Array.from(new Set(expandQueryGroups(query).flat()));
+}
+
+export function newsSearchTerms(query: string): string[] {
+  const compact = query.trim().replace(/\s+/g, ' ');
+  if (!compact) return [];
+
+  const override = prioritizedNewsTerms[compact] ?? prioritizedNewsTerms[compact.toUpperCase()];
+  const terms = override ? [...override, ...expandQuery(compact)] : expandQuery(compact);
+
+  return Array.from(new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 2)));
 }
 
 export function expandQueryGroups(query: string): string[][] {
