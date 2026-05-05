@@ -1,5 +1,5 @@
 export type QuoteSession = 'day' | 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
-export type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
+export type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq' | 'tradingview';
 
 export interface MarketQuote {
   symbol: string;
@@ -22,6 +22,7 @@ export interface MarketQuote {
   dayMarketTime?: string;
   dayMarketVolume?: number;
   dayMarketInterpolated?: boolean;
+  dayMarketSource?: string;
   regularPrice?: number;
   regularChange?: number;
   regularChangePercent?: number;

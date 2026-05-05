@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRobinhoodDayMarket, parseCnbcQuotePayload } from '../server/src/services/quoteService';
+import { applyRobinhoodDayMarket, applyTradingViewDayMarket, parseCnbcQuotePayload } from '../server/src/services/quoteService';
 
 describe('quote service', () => {
   it('uses extended market quote as active price during post market', () => {
@@ -155,6 +155,46 @@ describe('quote service', () => {
     expect(enriched.dayMarketPrice).toBeUndefined();
     expect(enriched.dayMarketInterpolated).toBe(true);
     expect(enriched.activeInterpolated).toBeUndefined();
+  });
+
+  it('uses TradingView day market quote before Robinhood interpolated chart data', () => {
+    const quote = parseCnbcQuotePayload({
+      QuickQuoteResult: {
+        QuickQuote: [{
+          symbol: 'SOXL',
+          name: 'Direxion Daily Semiconductor Bull 3X Shares',
+          exchange: 'NYSE Arca',
+          currencyCode: 'USD',
+          last: '127.55',
+          change: '-2.85',
+          change_pct: '-2.1856',
+          realTime: 'true',
+          curmktstatus: 'POST_MKT_PREV',
+          ExtendedMktQuote: {
+            type: 'POST_MKT_PREV',
+            last: '126.3501',
+            change: '-1.1999',
+            change_pct: '-0.9407'
+          }
+        }]
+      }
+    }, 'SOXL', new Date('2026-05-05T06:35:00.000Z'));
+
+    const enriched = applyTradingViewDayMarket(quote, {
+      data: [{
+        s: 'AMEX:SOXL',
+        d: ['SOXL', 'Direxion Daily Semiconductor Bull 3X ETF', 132.2, 1.3803680981594961, 1.8, 3861552, 1777881600, 'out_of_session', 1777939198]
+      }]
+    });
+
+    expect(enriched.provider).toBe('tradingview');
+    expect(enriched.activeSession).toBe('day');
+    expect(enriched.activePrice).toBe(132.2);
+    expect(enriched.activeChange).toBe(1.8);
+    expect(enriched.activeChangePercent).toBe(1.3803680981594961);
+    expect(enriched.activeTime).toBe(quote.generatedAt);
+    expect(enriched.dayMarketPrice).toBe(132.2);
+    expect(enriched.dayMarketSource).toBe('TradingView premarket/day scanner');
   });
 
   it('uses a real 24 hour chart trade during the Korean day market when available', () => {

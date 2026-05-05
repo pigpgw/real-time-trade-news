@@ -114,6 +114,13 @@ interface RobinhoodHistoricalResponse {
   }>;
 }
 
+interface TradingViewScanResponse {
+  data?: Array<{
+    s?: string;
+    d?: Array<string | number | null>;
+  }>;
+}
+
 const CACHE_TTL_MS = Math.max(500, config.quoteCacheTtlMs);
 const cache = new Map<string, { expiresAt: number; quote: MarketQuote }>();
 const inFlight = new Map<string, Promise<MarketQuote>>();
@@ -133,6 +140,7 @@ export async function getMarketQuote(symbol: string): Promise<MarketQuote> {
   const request = fetchCnbcQuote(normalized)
     .catch(() => fetchYahooChartQuote(normalized))
     .catch(() => fetchNasdaqQuote(normalized))
+    .then((quote) => enrichWithTradingViewDayMarket(quote, normalized))
     .then((quote) => enrichWithRobinhoodDayMarket(quote, normalized))
     .then((quote) => {
       cache.set(normalized, { expiresAt: Date.now() + CACHE_TTL_MS, quote });
@@ -394,7 +402,7 @@ async function fetchNasdaqQuote(symbol: string): Promise<MarketQuote> {
 }
 
 async function enrichWithRobinhoodDayMarket(quote: MarketQuote, symbol: string): Promise<MarketQuote> {
-  if (quote.session !== 'day') return quote;
+  if (quote.session !== 'day' || quote.dayMarketPrice !== undefined) return quote;
 
   try {
     const payload = await fetchJson<RobinhoodHistoricalResponse>(
@@ -410,6 +418,79 @@ async function enrichWithRobinhoodDayMarket(quote: MarketQuote, symbol: string):
   } catch {
     return quote;
   }
+}
+
+async function enrichWithTradingViewDayMarket(quote: MarketQuote, symbol: string): Promise<MarketQuote> {
+  if (quote.session !== 'day') return quote;
+
+  const columns = [
+    'name',
+    'description',
+    'premarket_close',
+    'premarket_change',
+    'premarket_change_abs',
+    'premarket_volume',
+    'premarket_time',
+    'current_session',
+    'update_time'
+  ];
+
+  for (const ticker of tradingViewTickers(symbol)) {
+    try {
+      const payload = await fetchJson<TradingViewScanResponse>(
+        'https://scanner.tradingview.com/america/scan',
+        {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbols: { tickers: [ticker], query: { types: [] } },
+            columns
+          })
+        },
+        5_000
+      );
+      const result = applyTradingViewDayMarket(quote, payload);
+      if (result.dayMarketPrice !== undefined) return result;
+    } catch {
+      // Try the next exchange alias.
+    }
+  }
+
+  return quote;
+}
+
+export function applyTradingViewDayMarket(quote: MarketQuote, payload: TradingViewScanResponse): MarketQuote {
+  const row = payload.data?.[0]?.d;
+  if (!row) return quote;
+
+  const price = toNumber(row[2]);
+  if (price === undefined) return quote;
+
+  const changePercent = toNumber(row[3]);
+  const change = toNumber(row[4]);
+  const volume = typeof row[5] === 'number' ? row[5] : toNumber(row[5]);
+  const time = typeof row[6] === 'number' ? new Date(row[6] * 1000).toISOString() : undefined;
+
+  return {
+    ...quote,
+    provider: 'tradingview',
+    isRealtime: false,
+    marketState: `${quote.marketState}; DAY_MARKET_TRADINGVIEW`,
+    activeSession: 'day',
+    activePrice: price,
+    activeChange: change,
+    activeChangePercent: changePercent,
+    activeTime: quote.generatedAt,
+    activeInterpolated: false,
+    dayMarketPrice: price,
+    dayMarketChange: change,
+    dayMarketChangePercent: changePercent,
+    dayMarketTime: time,
+    dayMarketVolume: volume,
+    dayMarketInterpolated: false,
+    dayMarketSource: 'TradingView premarket/day scanner',
+    message: [quote.message, 'TradingView premarket/day scanner'].filter(Boolean).join(' + ')
+  };
 }
 
 export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHistoricalResponse): MarketQuote {
@@ -465,6 +546,26 @@ function normalizeSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (!/^[A-Z0-9.=-]{1,12}$/.test(normalized)) throw new Error('invalid quote symbol');
   return normalized;
+}
+
+function tradingViewTickers(symbol: string): string[] {
+  const normalized = symbol.toUpperCase();
+  const preferredExchange = new Map<string, string>([
+    ['SOXL', 'AMEX'],
+    ['SOXS', 'AMEX'],
+    ['TQQQ', 'NASDAQ'],
+    ['SQQQ', 'NASDAQ'],
+    ['QQQ', 'NASDAQ'],
+    ['SPY', 'AMEX']
+  ]);
+  const exchanges = [
+    preferredExchange.get(normalized),
+    'AMEX',
+    'NASDAQ',
+    'NYSE'
+  ].filter(Boolean) as string[];
+
+  return [...new Set(exchanges)].map((exchange) => `${exchange}:${normalized}`);
 }
 
 function firstQuote(value: CnbcQuote[] | CnbcQuote | undefined): CnbcQuote | undefined {

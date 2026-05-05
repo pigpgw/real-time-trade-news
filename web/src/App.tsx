@@ -34,7 +34,7 @@ type DisplayLanguage = 'ko' | 'en' | 'original';
 type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
 type QuoteSession = 'day' | 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
-type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
+type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq' | 'tradingview';
 type NewsDirection = 'bullish' | 'bearish' | 'mixed' | 'neutral';
 type PositionBias = 'long' | 'inverse' | 'unknown';
 type PositionEffect = 'favorable' | 'unfavorable' | 'mixed' | 'neutral';
@@ -232,6 +232,7 @@ interface MarketQuote {
   dayMarketTime?: string;
   dayMarketVolume?: number;
   dayMarketInterpolated?: boolean;
+  dayMarketSource?: string;
   regularPrice?: number;
   regularChange?: number;
   regularChangePercent?: number;
@@ -866,7 +867,11 @@ function QuoteStrip({
   const changePercent = quote?.activeChangePercent;
   const currency = quote?.currency ?? 'USD';
   const lastTradeAt = quote?.activeTime ?? quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime;
-  const activityLabel = quote?.activeInterpolated ? '차트' : '체결';
+  const activityLabel = quote?.activeSession === 'day' && quote.dayMarketSource
+    ? '참고'
+    : quote?.activeInterpolated
+      ? '차트'
+      : '체결';
   const quoteStatus = quote ? quoteFreshnessLabel(quote) : '지연';
   const priceContext = quote ? quotePriceContextLabel(quote) : '가격 대기';
   const nextSession = quote?.nextSession && quote.nextSessionTime
