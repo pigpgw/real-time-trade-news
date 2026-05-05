@@ -95,6 +95,24 @@ interface NasdaqQuoteResponse {
   };
 }
 
+interface RobinhoodHistoricalResponse {
+  symbol?: string;
+  previous_close_price?: string;
+  previous_close_time?: string;
+  open_price?: string;
+  open_time?: string;
+  historicals?: Array<{
+    begins_at?: string;
+    open_price?: string;
+    close_price?: string;
+    high_price?: string;
+    low_price?: string;
+    volume?: number;
+    session?: string;
+    interpolated?: boolean;
+  }>;
+}
+
 const CACHE_TTL_MS = 5_000;
 const cache = new Map<string, { expiresAt: number; quote: MarketQuote }>();
 const inFlight = new Map<string, Promise<MarketQuote>>();
@@ -114,6 +132,7 @@ export async function getMarketQuote(symbol: string): Promise<MarketQuote> {
   const request = fetchCnbcQuote(normalized)
     .catch(() => fetchYahooChartQuote(normalized))
     .catch(() => fetchNasdaqQuote(normalized))
+    .then((quote) => enrichWithRobinhoodDayMarket(quote, normalized))
     .then((quote) => {
       cache.set(normalized, { expiresAt: Date.now() + CACHE_TTL_MS, quote });
       return quote;
@@ -371,6 +390,61 @@ async function fetchNasdaqQuote(symbol: string): Promise<MarketQuote> {
   };
 }
 
+async function enrichWithRobinhoodDayMarket(quote: MarketQuote, symbol: string): Promise<MarketQuote> {
+  if (quote.session !== 'day') return quote;
+
+  try {
+    const payload = await fetchJson<RobinhoodHistoricalResponse>(
+      `https://api.robinhood.com/marketdata/historicals/${encodeURIComponent(symbol)}/?${new URLSearchParams({
+        interval: '5minute',
+        span: 'day',
+        bounds: '24_7'
+      }).toString()}`,
+      { headers },
+      5_000
+    );
+    return applyRobinhoodDayMarket(quote, payload);
+  } catch {
+    return quote;
+  }
+}
+
+export function applyRobinhoodDayMarket(quote: MarketQuote, payload: RobinhoodHistoricalResponse): MarketQuote {
+  const latest = lastHistorical(payload.historicals);
+  const price = toNumber(latest?.close_price);
+  if (price === undefined) {
+    return {
+      ...quote,
+      marketState: `${quote.marketState}; DAY_MARKET_OPEN`
+    };
+  }
+
+  const previous = quote.regularPrice ?? quote.previousClose ?? toNumber(payload.previous_close_price);
+  const change = computeChange(price, previous);
+  const changePercent = computeChangePercent(change, previous);
+  const time = parseDate(latest?.begins_at) ?? parseDate(payload.open_time);
+  const interpolated = Boolean(latest?.interpolated);
+
+  return {
+    ...quote,
+    marketState: `${quote.marketState}; DAY_MARKET_OPEN`,
+    isRealtime: true,
+    activeSession: 'day',
+    activePrice: price,
+    activeChange: change,
+    activeChangePercent: changePercent,
+    activeTime: time,
+    activeInterpolated: interpolated,
+    dayMarketPrice: price,
+    dayMarketChange: change,
+    dayMarketChangePercent: changePercent,
+    dayMarketTime: time,
+    dayMarketVolume: latest?.volume,
+    dayMarketInterpolated: interpolated,
+    message: [quote.message, 'Robinhood 24h chart bounds=24_7'].filter(Boolean).join(' + ')
+  };
+}
+
 function normalizeSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (!/^[A-Z0-9.=-]{1,12}$/.test(normalized)) throw new Error('invalid quote symbol');
@@ -412,6 +486,15 @@ function lastNumber(values?: Array<number | null>): number | undefined {
   for (let index = values.length - 1; index >= 0; index -= 1) {
     const value = values[index];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function lastHistorical(values?: RobinhoodHistoricalResponse['historicals']): NonNullable<RobinhoodHistoricalResponse['historicals']>[number] | undefined {
+  if (!values) return undefined;
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const item = values[index];
+    if (toNumber(item?.close_price) !== undefined) return item;
   }
   return undefined;
 }
@@ -464,6 +547,19 @@ function usEquitySession(now: Date): UsEquityClock {
   const weekday = weekdayIndex(parts.weekday);
   const isTradingWeekday = weekday >= 1 && weekday <= 5;
 
+  if (isDayMarketOpen(weekday, minuteOfDay)) {
+    const isMorningDayMarket = minuteOfDay < PRE_MARKET_OPEN;
+    const nextDay = isMorningDayMarket
+      ? { year: parts.year, month: parts.month, day: parts.day }
+      : nextCalendarDay(parts);
+
+    return {
+      session: 'day',
+      nextSession: 'pre',
+      nextSessionTime: zonedDateTimeToUtc(nextDay.year, nextDay.month, nextDay.day, 4, 0, NY_TIME_ZONE)
+    };
+  }
+
   if (isTradingWeekday && minuteOfDay >= PRE_MARKET_OPEN && minuteOfDay < REGULAR_OPEN) {
     return {
       session: 'pre',
@@ -483,18 +579,42 @@ function usEquitySession(now: Date): UsEquityClock {
   if (isTradingWeekday && minuteOfDay >= REGULAR_CLOSE && minuteOfDay < POST_MARKET_CLOSE) {
     return {
       session: 'post',
-      nextSession: 'pre',
-      nextSessionTime: nextTradingDayStart(parts, weekday)
+      nextSession: weekday === 5 ? 'pre' : 'day',
+      nextSessionTime: weekday === 5
+        ? nextTradingDayStart(parts, weekday)
+        : zonedDateTimeToUtc(parts.year, parts.month, parts.day, 20, 0, NY_TIME_ZONE)
     };
   }
 
   return {
     session: 'closed',
-    nextSession: 'pre',
-    nextSessionTime: minuteOfDay < PRE_MARKET_OPEN && isTradingWeekday
-      ? zonedDateTimeToUtc(parts.year, parts.month, parts.day, 4, 0, NY_TIME_ZONE)
-      : nextTradingDayStart(parts, weekday)
+    nextSession: 'day',
+    nextSessionTime: nextDayMarketStart(parts, weekday, minuteOfDay)
   };
+}
+
+function isDayMarketOpen(weekday: number, minuteOfDay: number): boolean {
+  if (weekday === 0) return minuteOfDay >= POST_MARKET_CLOSE;
+  if (weekday >= 1 && weekday <= 4) return minuteOfDay < PRE_MARKET_OPEN || minuteOfDay >= POST_MARKET_CLOSE;
+  return weekday === 5 && minuteOfDay < PRE_MARKET_OPEN;
+}
+
+function nextDayMarketStart(parts: ZonedParts, weekday: number, minuteOfDay: number): string {
+  if (weekday === 0 && minuteOfDay < POST_MARKET_CLOSE) {
+    return zonedDateTimeToUtc(parts.year, parts.month, parts.day, 20, 0, NY_TIME_ZONE);
+  }
+
+  if (weekday >= 1 && weekday <= 4 && minuteOfDay < POST_MARKET_CLOSE) {
+    return zonedDateTimeToUtc(parts.year, parts.month, parts.day, 20, 0, NY_TIME_ZONE);
+  }
+
+  const daysToAdd = weekday === 5
+    ? 2
+    : weekday === 6
+      ? 1
+      : 1;
+  const next = addDaysToZonedDate(parts, daysToAdd);
+  return zonedDateTimeToUtc(next.year, next.month, next.day, 20, 0, NY_TIME_ZONE);
 }
 
 function nextTradingDayStart(parts: ZonedParts, weekday: number): string {
@@ -515,6 +635,19 @@ function nextTradingDayStart(parts: ZonedParts, weekday: number): string {
     0,
     NY_TIME_ZONE
   );
+}
+
+function nextCalendarDay(parts: ZonedParts): Pick<ZonedParts, 'year' | 'month' | 'day'> {
+  return addDaysToZonedDate(parts, 1);
+}
+
+function addDaysToZonedDate(parts: ZonedParts, days: number): Pick<ZonedParts, 'year' | 'month' | 'day'> {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate()
+  };
 }
 
 function zonedParts(date: Date, timeZone: string): ZonedParts {

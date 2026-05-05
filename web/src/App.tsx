@@ -33,7 +33,7 @@ type RankingMarket = 'KOSPI' | 'KOSDAQ' | 'US';
 type DisplayLanguage = 'ko' | 'en' | 'original';
 type NewsImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 type NewsDeliveryMode = 'breaking' | 'priority' | 'watch' | 'normal';
-type QuoteSession = 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
+type QuoteSession = 'day' | 'pre' | 'regular' | 'post' | 'closed' | 'unknown';
 type QuoteProvider = 'cnbc' | 'yahoo-chart' | 'nasdaq';
 type NewsDirection = 'bullish' | 'bearish' | 'mixed' | 'neutral';
 type PositionBias = 'long' | 'inverse' | 'unknown';
@@ -225,6 +225,13 @@ interface MarketQuote {
   activeChange?: number;
   activeChangePercent?: number;
   activeTime?: string;
+  activeInterpolated?: boolean;
+  dayMarketPrice?: number;
+  dayMarketChange?: number;
+  dayMarketChangePercent?: number;
+  dayMarketTime?: string;
+  dayMarketVolume?: number;
+  dayMarketInterpolated?: boolean;
   regularPrice?: number;
   regularChange?: number;
   regularChangePercent?: number;
@@ -832,6 +839,7 @@ function QuoteStrip({
   const changePercent = quote?.activeChangePercent;
   const currency = quote?.currency ?? 'USD';
   const lastTradeAt = quote?.activeTime ?? quote?.postMarketTime ?? quote?.preMarketTime ?? quote?.extendedTime ?? quote?.regularTime;
+  const activityLabel = quote?.activeInterpolated ? '차트' : '체결';
   const quoteStatus = quote ? quoteFreshnessLabel(quote) : '지연';
   const priceContext = quote ? quotePriceContextLabel(quote) : '가격 대기';
   const nextSession = quote?.nextSession && quote.nextSessionTime
@@ -853,11 +861,12 @@ function QuoteStrip({
         <span className={tone}>{formatSignedNumber(change)} · {formatSignedPercent(changePercent)}</span>
       </div>
       <div className="quote-metrics">
+        <Metric label="주간거래" valueText={formatMaybeCurrency(quote?.dayMarketPrice, currency)} />
         <Metric label="정규장" valueText={formatMaybeCurrency(quote?.regularPrice, currency)} />
         <Metric label="프리마켓" valueText={formatMaybeCurrency(quote?.preMarketPrice, currency)} />
         <Metric label="애프터마켓" valueText={formatMaybeCurrency(quote?.postMarketPrice, currency)} />
         <Metric label="거래량" valueText={formatCompactNumber(quote?.volume)} />
-        <Metric label="체결" valueText={lastTradeAt ? formatAge(lastTradeAt) : '-'} />
+        <Metric label={activityLabel} valueText={lastTradeAt ? formatAge(lastTradeAt) : '-'} />
         <Metric label="수집" valueText={quote ? formatAge(quote.generatedAt) : '-'} />
       </div>
       <div className="quote-source">
@@ -1554,6 +1563,7 @@ function isNegativeNumber(value?: number): boolean {
 }
 
 function quoteSessionLabel(session: QuoteSession): string {
+  if (session === 'day') return '주간거래';
   if (session === 'pre') return '프리마켓';
   if (session === 'regular') return '정규장';
   if (session === 'post') return '애프터마켓';
@@ -1563,6 +1573,7 @@ function quoteSessionLabel(session: QuoteSession): string {
 
 function quoteFreshnessLabel(quote: MarketQuote): string {
   if (!quote.isRealtime) return '지연 수집';
+  if (quote.activeInterpolated) return '24h 보간';
 
   const collectedAt = new Date(quote.generatedAt).getTime();
   if (!Number.isFinite(collectedAt)) return '수집중';
@@ -1581,6 +1592,7 @@ function quotePriceContextLabel(quote: MarketQuote): string {
     return `${source} · ${sessionLabel}`;
   }
 
+  if (quote.activeInterpolated) return `24h 차트 · ${sessionLabel}`;
   return `현재 · ${sessionLabel}`;
 }
 
