@@ -311,6 +311,7 @@ export function App() {
     await queryClient.cancelQueries({ queryKey: ['news-search'] });
     eventSourceRef.current?.close();
     localStorage.setItem('last-news-query', trimmed);
+    syncQueryParam(trimmed);
     setActiveQuery(trimmed);
     setConnectionState('connecting');
     setError(undefined);
@@ -1304,7 +1305,15 @@ function articleExcerpt(item: NewsItem, detail: ArticleDetail | undefined, displ
 }
 
 function getInitialQuery(): string {
+  const queryParam = new URLSearchParams(window.location.search).get('q')?.trim();
+  if (queryParam) return queryParam;
   return localStorage.getItem('last-news-query') || 'SOXL';
+}
+
+function syncQueryParam(query: string): void {
+  const params = new URLSearchParams(window.location.search);
+  params.set('q', query);
+  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
 }
 
 function getInitialLanguage(): DisplayLanguage {
